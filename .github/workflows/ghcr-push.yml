@@ -1,6 +1,6 @@
 name: Image áttöltése GHCR-re
 on: 
-  workflow_dispatch:
+  workflow_dispatch: # Kézi indításhoz az Actions fülön
 
 jobs:
   push-to-ghcr:
@@ -9,25 +9,31 @@ jobs:
       packages: write
       contents: read
     steps:
+      - name: Checkout kód
+        uses: actions/checkout@v4
+
       - name: Bejelentkezés a GHCR-be
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
-      - name: Image letöltése a Release-ből (Javított linkkel)
+      - name: Image letöltése GitHub CLI-vel
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # A pontos link a te képed alapján:
-          curl -L -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-          -H "Accept: application/octet-stream" \
-          "https://github.com/mark19xx/iverbs/releases/download/v0.1-alpha/iverbs-image.tar" \
-          -o iverbs-image.tar
+          # Letöltjük a pontos fájlt a megadott Release-ből
+          gh release download v0.1-alpha --repo mark19xx/iverbs --pattern "iverbs-image.tar"
 
-      - name: Ellenőrzés
+      - name: Ellenőrzés (Méret ellenőrzése a logban)
         run: ls -lh iverbs-image.tar
 
-      - name: Image betöltése és feltolása
+      - name: Image betöltése, címkézése és feltolása
         run: |
+          # Betöltjük a Dockerbe a fájlt
           docker load -i iverbs-image.tar
-          # Megkeressük az ID-t és feltoljuk
+          
+          # Megkeressük a frissen betöltött image ID-ját
           IMAGE_ID=$(docker images -q | head -n 1)
+          echo "Betöltött Image ID: $IMAGE_ID"
+          
+          # Átcímkézzük a GHCR formátumra és feltoljuk a legfrissebb (latest) jelzővel
           docker tag $IMAGE_ID ghcr.io/mark19xx/iverbs:latest
           docker push ghcr.io/mark19xx/iverbs:latest
-          
