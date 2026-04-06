@@ -30,3 +30,4 @@ jobs:
           IMAGE_ID=$(docker images -q | head -n 1)
           docker tag $IMAGE_ID ghcr.io/mark19xx/iverbs:latest
           docker push ghcr.io/mark19xx/iverbs:latest
+          
