@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>IVERBS - Image & Video EXIF Restore</title>
+    <link href="{{ url_for('static', filename='bootstrap.min.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='bootstrap-icons.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='style.css') }}" rel="stylesheet">
+</head>
+<body>
+<div class="container">
+    <nav class="navbar navbar-dark mb-4 p-3">
+        <span id="brand" class="navbar-brand h1" style="cursor: pointer;">IVERBS</span>
+        <div class="ms-auto">
+            <button id="runRsync" class="btn btn-sm btn-info">Run Rsync</button>
+        </div>
+    </nav>
+
+    <div class="card mb-4">
+        <div class="card-header bg-secondary text-white">
+            <!-- Desktop header -->
+            <div class="desktop-header">
+                <div class="fw-bold"><i class="bi bi-folder"></i> {{ watch_name }}</div>
+                <div class="watch-center">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="watchdogToggle">
+                        <label class="form-check-label" for="watchdogToggle">Watch</label>
+                    </div>
+                </div>
+                <div class="date-group">
+                    <div>
+                        <label class="form-label mb-0">Min</label>
+                        <input type="date" id="autofixMinDate" class="form-control form-control-sm">
+                    </div>
+                    <div>
+                        <label class="form-label mb-0">Max</label>
+                        <input type="date" id="autofixMaxDate" class="form-control form-control-sm">
+                    </div>
+                </div>
+            </div>
+            <!-- Mobile header (2x2 grid) -->
+            <div class="mobile-header-grid">
+                <div class="fw-bold"><i class="bi bi-folder"></i> {{ watch_name }}</div>
+                <div class="watch-mobile">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="watchdogToggle">
+                        <label class="form-check-label" for="watchdogToggle">Watch</label>
+                    </div>
+                </div>
+                <div class="min-mobile">
+                    <label class="form-label mb-0">Min</label>
+                    <input type="date" id="autofixMinDate" class="form-control form-control-sm">
+                </div>
+                <div class="max-mobile">
+                    <label class="form-label mb-0">Max</label>
+                    <input type="date" id="autofixMaxDate" class="form-control form-control-sm">
+                </div>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="d-flex flex-wrap gap-3 align-items-center mb-3">
+                <button id="runAutofix" class="btn btn-primary">Auto Fix</button>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="autofixAll" checked>
+                    <label class="form-check-label" for="autofixAll">Missing only</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="autofixOverwrite">
+                    <label class="form-check-label" for="autofixOverwrite">Overwrite</label>
+                </div>
+            </div>
+
+            <div class="table-responsive">
+                <table class="table table-hover" style="min-width: 650px;">
+                    <thead>
+                        <tr>
+                            <th><button id="refreshBrowserBtn" class="refresh-btn" title="Refresh"><i class="bi bi-arrow-clockwise"></i></button></th>
+                            <th>Thumb</th>
+                            <th>Name</th>
+                            <th>EXIF Date</th>
+                            <th>Estimated Fix</th>
+                            <th>Set Date</th>
+                        </tr>
+                    </thead>
+                    <tbody id="fileBrowser"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
+            <span>Console Output</span>
+            <button id="clearAutofixOutputConsole" class="btn btn-sm btn-outline-secondary">Clear</button>
+        </div>
+        <div class="card-body">
+            <pre id="autofixOutput"></pre>
+        </div>
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='bootstrap.bundle.min.js') }}"></script>
+<script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
