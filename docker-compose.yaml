@@ -1,0 +1,15 @@
+services:
+  iverbs:
+    build: .
+    container_name: iverbs
+    restart: unless-stopped
+    ports:
+      - "8080:5000"
+    volumes:
+      - ${WATCH_SOURCES:-/home/user}:/watch/sources:rw
+      - ${DATA_DIR:-/opt/docker/iverbs/data}:/data:rw
+    environment:
+      - WATCH_DIR=/watch/sources
+      - DB_PATH=/data/db/iverbs.db
+    stdin_open: true
+    tty: true
