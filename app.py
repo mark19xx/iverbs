@@ -27,7 +27,6 @@ watchdog_queue = queue.Queue()
 watchdog_worker_running = False
 
 def load_cache():
-    """Betölti a cache-t a JSON fájlból."""
     global exif_cache
     if os.path.exists(CACHE_FILE):
         with open(CACHE_FILE, 'r') as f:
@@ -39,14 +38,12 @@ def load_cache():
             exif_cache = {}
 
 def save_cache():
-    """Menti a cache-t a JSON fájlba."""
     with cache_lock:
         data = exif_cache.copy()
     with open(CACHE_FILE, 'w') as f:
         json.dump(data, f)
 
 def check_exif(file_path):
-    """Ellenőrzi, hogy van-e DateTimeOriginal a fájlban. Cache-t is frissít."""
     try:
         import subprocess
         result = subprocess.run(
@@ -63,12 +60,10 @@ def check_exif(file_path):
         return False
 
 def refresh_cache_for_file(file_path):
-    """Egy fájl cache-ének frissítése (watchdog hívja)."""
     check_exif(file_path)
     save_cache()
 
 def get_tree(root_path):
-    """Visszaadja a mappafa szerkezetét (alkönyvtárak listája)."""
     tree = []
     try:
         for entry in os.scandir(root_path):
@@ -79,7 +74,6 @@ def get_tree(root_path):
     return sorted(tree)
 
 def get_files_in_dir(dir_path, limit=50, offset=0, missing_only=False):
-    """Visszaadja a mappában lévő fájlokat (nem rekurzív), lapozva."""
     files = []
     all_files = []
     try:
@@ -97,16 +91,13 @@ def get_files_in_dir(dir_path, limit=50, offset=0, missing_only=False):
                 })
     except Exception:
         pass
-    # Lapozás
     total = len(all_files)
     files = all_files[offset:offset+limit]
     return files, total
 
 def extract_date_from_filename(file_path):
-    """Fájlnévből dátum kinyerése (egyszerűsített, általános)."""
     import re
     filename = os.path.basename(file_path)
-    # Unix timestamp
     m = re.search(r'\b(\d{10})(?:\d{3})?\b', filename)
     if m:
         ts = int(m.group(1))
@@ -116,7 +107,6 @@ def extract_date_from_filename(file_path):
             return datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')
         except:
             pass
-    # YYYYMMDD_HHMMSS vagy YYYY-MM-DD HH.MM.SS
     m = re.search(r'(\d{4})(\d{2})(\d{2})[ _-]?(\d{2})(\d{2})(\d{2})', filename)
     if m:
         y, mo, d, H, M, S = map(int, m.groups())
@@ -144,12 +134,10 @@ def extract_date_from_filename(file_path):
     return None
 
 def fix_file(file_path, overwrite=False, dry_run=False):
-    """Egy fájl EXIF-jének javítása a fájlnévből kinyert dátummal."""
     estimated = extract_date_from_filename(file_path)
     if not estimated:
         return {'error': 'No date in filename'}
     if not overwrite:
-        # Ellenőrizzük, van-e már EXIF (cache-ből vagy friss)
         with cache_lock:
             has = exif_cache.get(file_path, False)
         if not has:
@@ -166,7 +154,6 @@ def fix_file(file_path, overwrite=False, dry_run=False):
            file_path]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode == 0:
-        # Frissítjük a cache-t
         with cache_lock:
             exif_cache[file_path] = True
         save_cache()
@@ -174,7 +161,6 @@ def fix_file(file_path, overwrite=False, dry_run=False):
     else:
         return {'error': result.stderr}
 
-# Watchdog eseménykezelő rate limitinggel
 class RateLimitedHandler(FileSystemEventHandler):
     def on_created(self, event):
         if not event.is_directory and event.src_path.lower().endswith(('.jpg', '.jpeg', '.png', '.mp4', '.mov', '.avi', '.jpe', '.jfif')):
@@ -184,14 +170,11 @@ class RateLimitedHandler(FileSystemEventHandler):
             watchdog_queue.put(event.dest_path)
 
 def watchdog_worker():
-    """Dolgozó szál a watchdog események feldolgozására (rate limiting)."""
     global watchdog_worker_running
     while watchdog_worker_running:
         try:
             file_path = watchdog_queue.get(timeout=1)
-            # Rate limiting: várjunk 0.3 másodpercet a következő fájl előtt
             time.sleep(0.3)
-            # Ellenőrizzük az EXIF-et és javítsuk, ha szükséges
             if not check_exif(file_path):
                 fix_file(file_path, overwrite=False, dry_run=False)
         except queue.Empty:
@@ -199,7 +182,6 @@ def watchdog_worker():
         except Exception as e:
             app.logger.error(f"Watchdog worker error: {e}")
 
-# Globális observer
 observer = None
 
 def start_watchdog():
@@ -228,16 +210,13 @@ def stop_watchdog():
     if os.path.exists(PID_FILE):
         os.remove(PID_FILE)
 
-# Flask API
 @app.route('/')
 def index():
-    # Átadjuk a bindelt mappák listáját a sablonnak (mappa nevek)
     sources = [os.path.basename(p.rstrip('/')) for p in WATCH_SOURCES]
     return render_template('index.html', sources=sources)
 
 @app.route('/api/tree/<int:source_idx>')
 def api_tree(source_idx):
-    """Visszaadja a kiválasztott forrás mappa fájafáját (alkönyvtárak)."""
     if source_idx >= len(WATCH_SOURCES):
         return jsonify([])
     root = WATCH_SOURCES[source_idx].strip()
@@ -258,7 +237,6 @@ def api_browse():
     if not os.path.exists(full_path) or not os.path.isdir(full_path):
         return jsonify({'error': 'Invalid path'}), 400
     files, total = get_files_in_dir(full_path, limit, offset, missing_only)
-    # A fájlokhoz hozzáadjuk a becsült dátumot is (cache nélkül)
     for f in files:
         f['estimated'] = extract_date_from_filename(f['path'])
     return jsonify({'files': files, 'total': total})
@@ -287,9 +265,7 @@ def api_batch_fix():
 
 @app.route('/api/refresh_cache', methods=['POST'])
 def api_refresh_cache():
-    """Manuális cache frissítés gomb."""
     load_cache()
-    # Frissítsük a cache-t az összes fájlra? (túl lassú). Inkább csak betöltjük a fájlból.
     return jsonify({'success': True})
 
 @app.route('/api/watchdog_status', methods=['GET'])

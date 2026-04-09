@@ -7,10 +7,6 @@ let missingOnly = false;
 let overwrite = false;
 
 async function loadTabs() {
-    const res = await fetch('/api/config'); // nincs ilyen, de a / visszaadja a sources listát? A sablonban átadjuk. Egyszerűbb: a HTML-ben a sources listát a backend beleteszi egy globális változóba.
-    // Mivel a sablonban a sources listát a backend rendereli, a frontend ezt a listát a window.sources-ból veheti.
-    // A jelenlegi index.html nem adja át. Javítsuk: a backend rendereléskor átadja a sources listát.
-    // A scriptben a window.sources-t használjuk.
     const sources = window.sources || [];
     const tabsDiv = document.getElementById('tabs');
     tabsDiv.innerHTML = '';
@@ -56,7 +52,6 @@ async function loadTree() {
         };
         treeDiv.appendChild(div);
     });
-    // Vissza a gyökérhez
     const rootDiv = document.createElement('div');
     rootDiv.className = 'tree-item';
     rootDiv.textContent = '📁 ..';
@@ -129,11 +124,10 @@ async function fixSingleFile(filePath) {
     });
     const data = await res.json();
     logToConsole(data);
-    loadFiles(); // refresh
+    loadFiles();
 }
 
 async function batchFix() {
-    // Lekérjük a jelenlegi oldal fájljait
     const url = `/api/browse?source=${currentSource}&path=${encodeURIComponent(currentPath)}&limit=${pageSize}&offset=${(currentPage-1)*pageSize}&missing_only=${missingOnly}`;
     const res = await fetch(url);
     const data = await res.json();
@@ -183,7 +177,6 @@ document.getElementById('refreshCache').addEventListener('click', async () => {
     loadFiles();
 });
 
-// Kezdeti betöltés
 window.sources = {{ sources|tojson }};
 loadTabs();
 loadTree();
