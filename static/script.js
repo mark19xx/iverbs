@@ -7,7 +7,8 @@ let missingOnly = false;
 let overwrite = false;
 
 async function loadTabs() {
-    const sources = window.sources || [];
+    const res = await fetch('/api/sources');
+    const sources = await res.json();
     const tabsDiv = document.getElementById('tabs');
     tabsDiv.innerHTML = '';
     sources.forEach((src, idx) => {
@@ -177,7 +178,6 @@ document.getElementById('refreshCache').addEventListener('click', async () => {
     loadFiles();
 });
 
-window.sources = {{ sources|tojson }};
 loadTabs();
 loadTree();
 loadFiles();

@@ -59,10 +59,6 @@ def check_exif(file_path):
             exif_cache[file_path] = False
         return False
 
-def refresh_cache_for_file(file_path):
-    check_exif(file_path)
-    save_cache()
-
 def get_tree(root_path):
     tree = []
     try:
@@ -212,8 +208,12 @@ def stop_watchdog():
 
 @app.route('/')
 def index():
+    return render_template('index.html')
+
+@app.route('/api/sources')
+def api_sources():
     sources = [os.path.basename(p.rstrip('/')) for p in WATCH_SOURCES]
-    return render_template('index.html', sources=sources)
+    return jsonify(sources)
 
 @app.route('/api/tree/<int:source_idx>')
 def api_tree(source_idx):
