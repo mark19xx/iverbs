@@ -29,10 +29,9 @@ task_counter = 0
 observers = {}
 watchdog_queues = {}
 watchdog_workers = {}
-watchdog_states = {}  # source_idx -> bool (enabled)
+watchdog_states = {}
 
 def load_watchdog_states():
-    """Betölti a watchdog állapotokat a fájlokból."""
     global watchdog_states
     for i in range(len(WATCH_SOURCES)):
         state_file = os.path.join(STATE_DIR, f'watchdog_{i}.state')
@@ -43,7 +42,6 @@ def load_watchdog_states():
             watchdog_states[i] = False
 
 def save_watchdog_state(source_idx):
-    """Ment egy watchdog állapotot fájlba."""
     state_file = os.path.join(STATE_DIR, f'watchdog_{source_idx}.state')
     with open(state_file, 'w') as f:
         f.write('true' if watchdog_states.get(source_idx, False) else 'false')
@@ -66,6 +64,7 @@ def save_cache():
         json.dump(data, f)
 
 def check_exif(file_path):
+    """Return (has_exif, exif_date_string)"""
     try:
         import subprocess
         result = subprocess.run(
@@ -73,9 +72,10 @@ def check_exif(file_path):
             capture_output=True, text=True, timeout=2
         )
         has = result.returncode == 0 and result.stdout.strip() not in ('', '0000:00:00 00:00:00')
+        date_str = result.stdout.strip() if has else None
         with cache_lock:
             exif_cache[file_path] = has
-        return has, result.stdout.strip()
+        return has, date_str
     except Exception:
         with cache_lock:
             exif_cache[file_path] = False
@@ -92,6 +92,7 @@ def get_tree(root_path):
     return sorted(tree)
 
 def get_files_in_dir(dir_path, limit=20, offset=0, missing_only=False):
+    """Csak a fájlokat listázza, NEM hív exiftool-t!"""
     files = []
     all_files = []
     try:
@@ -102,12 +103,10 @@ def get_files_in_dir(dir_path, limit=20, offset=0, missing_only=False):
                     has_exif = exif_cache.get(full, False)
                 if missing_only and has_exif:
                     continue
-                _, exif_date = check_exif(full)
                 all_files.append({
                     'name': entry.name,
                     'path': full,
-                    'has_exif': has_exif,
-                    'exif_date': exif_date if exif_date else None
+                    'has_exif': has_exif
                 })
     except Exception:
         pass
@@ -153,7 +152,7 @@ def extract_date_from_filename(file_path):
             pass
     return None
 
-def fix_file(file_path, overwrite=False, dry_run=False):
+def fix_file(file_path, overwrite=False):
     estimated = extract_date_from_filename(file_path)
     if not estimated:
         return {'error': 'No date in filename'}
@@ -161,8 +160,6 @@ def fix_file(file_path, overwrite=False, dry_run=False):
         has, _ = check_exif(file_path)
         if has:
             return {'skipped': 'EXIF already exists'}
-    if dry_run:
-        return {'estimated': estimated}
     import subprocess
     cmd = ['exiftool', '-overwrite_original',
            f'-DateTimeOriginal={estimated}',
@@ -179,13 +176,12 @@ def fix_file(file_path, overwrite=False, dry_run=False):
         return {'error': result.stderr}
 
 def batch_fix_task(task_id, files, overwrite):
-    """Háttérszál a batch fix feldolgozására."""
     total = len(files)
     with tasks_lock:
         tasks[task_id] = {'total': total, 'processed': 0, 'status': 'running'}
     for i, file_path in enumerate(files):
         if os.path.exists(file_path):
-            fix_file(file_path, overwrite=overwrite, dry_run=False)
+            fix_file(file_path, overwrite=overwrite)
         with tasks_lock:
             tasks[task_id]['processed'] = i + 1
     with tasks_lock:
@@ -202,12 +198,10 @@ def watchdog_worker_func(source_idx, root_path):
             if not has:
                 fix_file(file_path, overwrite=False)
         except queue.Empty:
-            # check if should stop
             if not watchdog_states.get(source_idx, False):
                 break
         except Exception as e:
             app.logger.error(f"Watchdog worker error for {root_path}: {e}")
-    # clean up
     if source_idx in watchdog_queues:
         del watchdog_queues[source_idx]
     if source_idx in watchdog_workers:
@@ -227,7 +221,7 @@ class RateLimitedHandler(FileSystemEventHandler):
 
 def start_watchdog_for_source(source_idx):
     if source_idx in observers and observers[source_idx] is not None:
-        return True  # already running
+        return True
     root_path = WATCH_SOURCES[source_idx].strip()
     if not os.path.exists(root_path):
         return False
@@ -248,21 +242,16 @@ def start_watchdog_for_source(source_idx):
 def stop_watchdog_for_source(source_idx):
     if source_idx not in observers or observers[source_idx] is None:
         return False
-    # Stop observer
     observers[source_idx].stop()
     observers[source_idx].join()
     observers[source_idx] = None
-    # Signal worker to stop
     watchdog_states[source_idx] = False
-    # Optionally put a dummy item to wake up queue
     if source_idx in watchdog_queues:
         try:
             watchdog_queues[source_idx].put(None, timeout=0.1)
         except:
             pass
-    # Wait a bit for worker to exit
     time.sleep(0.5)
-    # Clean up
     if source_idx in watchdog_workers:
         del watchdog_workers[source_idx]
     if source_idx in watchdog_queues:
@@ -305,13 +294,21 @@ def api_browse():
         f['estimated'] = extract_date_from_filename(f['path'])
     return jsonify({'files': files, 'total': total})
 
+@app.route('/api/exif', methods=['GET'])
+def api_exif():
+    file_path = request.args.get('file')
+    if not file_path or not os.path.exists(file_path):
+        return jsonify({'error': 'File not found'}), 404
+    _, exif_date = check_exif(file_path)
+    return jsonify({'exif_date': exif_date})
+
 @app.route('/api/fix', methods=['POST'])
 def api_fix():
     data = request.json
     file_path = data.get('file')
     new_date = data.get('date')
     if new_date:
-        # Manual edit: set specific date
+        # Manual edit
         if not os.path.exists(file_path):
             return jsonify({'error': 'File not found'}), 400
         estimated = new_date + ' 00:00:00'
@@ -330,12 +327,10 @@ def api_fix():
         else:
             return jsonify({'error': result.stderr}), 500
     else:
-        # Auto fix based on filename
         overwrite = data.get('overwrite', False)
-        dry_run = data.get('dry_run', False)
         if not os.path.exists(file_path):
             return jsonify({'error': 'File not found'}), 400
-        result = fix_file(file_path, overwrite, dry_run)
+        result = fix_file(file_path, overwrite)
         return jsonify(result)
 
 @app.route('/api/batch_fix', methods=['POST'])
@@ -349,7 +344,6 @@ def api_batch_fix():
     with tasks_lock:
         task_counter += 1
         task_id = task_counter
-    # Start background thread
     thread = threading.Thread(target=batch_fix_task, args=(task_id, files, overwrite))
     thread.daemon = True
     thread.start()
@@ -366,11 +360,6 @@ def api_task_progress(task_id):
             'processed': task['processed'],
             'status': task['status']
         })
-
-@app.route('/api/refresh_cache', methods=['POST'])
-def api_refresh_cache():
-    load_cache()
-    return jsonify({'success': True})
 
 @app.route('/api/watchdog_status', methods=['GET'])
 def api_watchdog_status():
@@ -399,7 +388,6 @@ def api_stop_watchdog():
 if __name__ == '__main__':
     load_cache()
     load_watchdog_states()
-    # Auto-start watchdog for previously enabled sources
     for idx, enabled in watchdog_states.items():
         if enabled:
             start_watchdog_for_source(idx)

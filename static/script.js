@@ -5,7 +5,6 @@ let pageSize = 20;
 let totalFiles = 0;
 let missingOnly = false;
 
-// Watch állapotok tabonként
 let watchEnabled = [];
 let pollingInterval = null;
 let currentTaskId = null;
@@ -100,33 +99,42 @@ async function loadFiles() {
     tbody.innerHTML = '';
     files.forEach(f => {
         const row = tbody.insertRow();
-        row.insertCell(0).textContent = f.name;
+        // Name cell: click to open image in new tab
+        const nameCell = row.insertCell(0);
+        const nameLink = document.createElement('a');
+        nameLink.href = f.path;  // direct file URL (needs server static serving)
+        nameLink.target = '_blank';
+        nameLink.textContent = f.name;
+        nameLink.style.color = '#20c997';
+        nameLink.style.textDecoration = 'none';
+        nameCell.appendChild(nameLink);
         row.insertCell(1).textContent = f.estimated || '?';
         const exifStatus = f.has_exif ? '✓' : '✗';
         row.insertCell(2).textContent = exifStatus;
         const actionCell = row.insertCell(3);
-        const estimatedDate = f.estimated ? f.estimated.split(' ')[0] : null;
-        const exifDate = f.exif_date ? f.exif_date.split(' ')[0] : null;
-        const isMatch = (f.has_exif && estimatedDate && exifDate && estimatedDate === exifDate);
-        if (isMatch) {
-            const editBtn = document.createElement('button');
-            editBtn.textContent = 'Edit';
-            editBtn.className = 'btn-small';
-            editBtn.onclick = () => editFileDate(f.path, f.estimated);
-            actionCell.appendChild(editBtn);
-        } else {
-            const fixBtn = document.createElement('button');
-            fixBtn.textContent = 'Fix';
-            fixBtn.className = 'btn-small';
-            fixBtn.onclick = () => fixSingleFile(f.path);
-            actionCell.appendChild(fixBtn);
-        }
+        // Fix button (autofix from filename)
+        const fixBtn = document.createElement('button');
+        fixBtn.textContent = 'Fix';
+        fixBtn.className = 'btn-small';
+        fixBtn.onclick = () => fixSingleFile(f.path);
+        actionCell.appendChild(fixBtn);
+        // Edit button (manual date)
+        const editBtn = document.createElement('button');
+        editBtn.textContent = 'Edit';
+        editBtn.className = 'btn-small';
+        editBtn.style.marginLeft = '5px';
+        editBtn.onclick = () => editFileDate(f.path);
+        actionCell.appendChild(editBtn);
     });
     renderPagination();
 }
 
-async function editFileDate(filePath, estimated) {
-    const newDate = prompt(`Enter date (YYYY-MM-DD) for ${filePath.split('/').pop()}`, estimated ? estimated.split(' ')[0] : '');
+async function editFileDate(filePath) {
+    // First fetch current EXIF date (if any)
+    const exifRes = await fetch(`/api/exif?file=${encodeURIComponent(filePath)}`);
+    const exifData = await exifRes.json();
+    const currentExif = exifData.exif_date ? exifData.exif_date.split(' ')[0] : '';
+    const newDate = prompt(`Enter date (YYYY-MM-DD) for ${filePath.split('/').pop()}`, currentExif);
     if (!newDate) return;
     const res = await fetch('/api/fix', {
         method: 'POST',
@@ -166,7 +174,7 @@ async function startBatchFix() {
         alert('No files to process.');
         return;
     }
-    const overwrite = !missingOnly;  // if missingOnly is false, overwrite true
+    const overwrite = !missingOnly;
     const batchRes = await fetch('/api/batch_fix', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -177,7 +185,6 @@ async function startBatchFix() {
         currentTaskId = batchData.task_id;
         const writeBtn = document.getElementById('autoFixBtn');
         writeBtn.disabled = true;
-        // Start polling
         if (pollingInterval) clearInterval(pollingInterval);
         pollingInterval = setInterval(async () => {
             const progRes = await fetch(`/api/task/${currentTaskId}/progress`);
@@ -278,11 +285,6 @@ document.getElementById('missingOnly').addEventListener('change', (e) => {
     loadFiles();
 });
 document.getElementById('autoFixBtn').addEventListener('click', startBatchFix);
-document.getElementById('refreshCache').addEventListener('click', async () => {
-    await fetch('/api/refresh_cache', {method: 'POST'});
-    alert('Cache refreshed');
-    loadFiles();
-});
 document.getElementById('watchToggle').addEventListener('change', toggleWatchdog);
 
 loadTabs();
