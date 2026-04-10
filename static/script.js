@@ -99,10 +99,10 @@ async function loadFiles() {
     tbody.innerHTML = '';
     files.forEach(f => {
         const row = tbody.insertRow();
-        // Name cell: click to open image in new tab
         const nameCell = row.insertCell(0);
         const nameLink = document.createElement('a');
-        nameLink.href = f.path;  // direct file URL (needs server static serving)
+        // Használjuk az /api/image végpontot a fájl eléréséhez
+        nameLink.href = `/api/image/${encodeURIComponent(f.path)}`;
         nameLink.target = '_blank';
         nameLink.textContent = f.name;
         nameLink.style.color = '#20c997';
@@ -112,13 +112,11 @@ async function loadFiles() {
         const exifStatus = f.has_exif ? '✓' : '✗';
         row.insertCell(2).textContent = exifStatus;
         const actionCell = row.insertCell(3);
-        // Fix button (autofix from filename)
         const fixBtn = document.createElement('button');
         fixBtn.textContent = 'Fix';
         fixBtn.className = 'btn-small';
         fixBtn.onclick = () => fixSingleFile(f.path);
         actionCell.appendChild(fixBtn);
-        // Edit button (manual date)
         const editBtn = document.createElement('button');
         editBtn.textContent = 'Edit';
         editBtn.className = 'btn-small';
@@ -130,7 +128,6 @@ async function loadFiles() {
 }
 
 async function editFileDate(filePath) {
-    // First fetch current EXIF date (if any)
     const exifRes = await fetch(`/api/exif?file=${encodeURIComponent(filePath)}`);
     const exifData = await exifRes.json();
     const currentExif = exifData.exif_date ? exifData.exif_date.split(' ')[0] : '';

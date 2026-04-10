@@ -16,7 +16,7 @@ COPY app.py .
 COPY templates/ ./templates/
 COPY static/ ./static/
 
-RUN mkdir -p /data/cache /data/logs /data/state
+RUN mkdir -p /data/cache /data/logs /data/state /data/db
 VOLUME ["/data"]
 
 EXPOSE 5000

@@ -26,6 +26,11 @@ h1 {
     font-size: 1.5rem;
     color: #20c997;
 }
+.version {
+    font-size: 0.75rem;
+    color: #20c997;
+    opacity: 0.8;
+}
 .btn, button {
     background: #20c997;
     border: none;
@@ -111,13 +116,21 @@ h1 {
     border-radius: 12px;
     padding: 15px;
 }
-.toolbar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
+.pagination-container {
+    width: 100%;
     margin-bottom: 15px;
-    flex-wrap: wrap;
-    gap: 10px;
+}
+.pagination {
+    display: flex;
+    justify-content: center;
+    gap: 5px;
+    align-items: center;
+}
+.filter-container {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    margin-bottom: 20px;
 }
 .filter {
     display: flex;
@@ -147,13 +160,6 @@ th {
 tr:hover {
     background: #3a3a3a;
 }
-.pagination {
-    display: flex;
-    justify-content: center;
-    gap: 5px;
-    align-items: center;
-    margin-bottom: 15px;
-}
 .pagination button {
     background: #3a3a3a;
     color: #e0e0e0;
@@ -176,8 +182,8 @@ tr:hover {
     .tree-panel {
         width: 100%;
     }
-    .toolbar {
+    .filter {
         flex-direction: column;
-        align-items: stretch;
+        gap: 8px;
     }
 }

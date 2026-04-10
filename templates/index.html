@@ -3,15 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>IVERBS 0.2.6</title>
+    <title>IVERBS 0.2.7</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
 <div class="container">
     <nav>
-        <h1>IVERBS</h1>
+        <div>
+            <h1 style="display: inline-block; margin-right: 8px;">IVERBS</h1>
+            <span class="version">0.2.7</span>
+        </div>
         <div class="nav-buttons">
-            <!-- Refresh cache gomb eltávolítva -->
+            <!-- Refresh cache gomb már nincs -->
         </div>
     </nav>
 
@@ -28,8 +31,10 @@
             <div id="tree"></div>
         </div>
         <div class="content-panel">
-            <div class="toolbar">
+            <div class="pagination-container">
                 <div class="pagination" id="pagination"></div>
+            </div>
+            <div class="filter-container">
                 <div class="filter">
                     <label><input type="checkbox" id="missingOnly"> Missing only</label>
                     <button id="autoFixBtn" class="btn">Write</button>

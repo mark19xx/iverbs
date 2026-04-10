@@ -1,10 +1,11 @@
 import os
 import json
+import sqlite3
 import time
 import threading
 import queue
 from datetime import datetime
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, send_file
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
@@ -13,10 +14,22 @@ app = Flask(__name__)
 WATCH_SOURCES = os.environ.get('WATCH_DIRS', '/home/user').split(',')
 DATA_DIR = os.environ.get('DATA_PATH', '/data/cache')
 STATE_DIR = '/data/state'
-CACHE_FILE = os.path.join(DATA_DIR, 'exif_cache.json')
+DB_PATH = '/data/db/iverbs.db'
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(STATE_DIR, exist_ok=True)
+os.makedirs('/data/db', exist_ok=True)
 
+# SQLite inicializálás
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS exif_cache
+                 (file_path TEXT PRIMARY KEY, has_exif INTEGER, last_checked TIMESTAMP)''')
+    conn.commit()
+    conn.close()
+init_db()
+
+# Memória cache (a memóriabeli gyorsítás érdekében)
 exif_cache = {}
 cache_lock = threading.Lock()
 
@@ -31,40 +44,33 @@ watchdog_queues = {}
 watchdog_workers = {}
 watchdog_states = {}
 
-def load_watchdog_states():
-    global watchdog_states
-    for i in range(len(WATCH_SOURCES)):
-        state_file = os.path.join(STATE_DIR, f'watchdog_{i}.state')
-        if os.path.exists(state_file):
-            with open(state_file, 'r') as f:
-                watchdog_states[i] = f.read().strip().lower() == 'true'
-        else:
-            watchdog_states[i] = False
+# Háttérfeltöltő szál a cache frissítéséhez (alacsony prioritás)
+background_refresh_running = False
+background_refresh_thread = None
 
-def save_watchdog_state(source_idx):
-    state_file = os.path.join(STATE_DIR, f'watchdog_{source_idx}.state')
-    with open(state_file, 'w') as f:
-        f.write('true' if watchdog_states.get(source_idx, False) else 'false')
-
-def load_cache():
+def load_cache_from_db():
+    """Betölti a teljes cache-t az adatbázisból a memóriába."""
     global exif_cache
-    if os.path.exists(CACHE_FILE):
-        with open(CACHE_FILE, 'r') as f:
-            data = json.load(f)
-        with cache_lock:
-            exif_cache = data
-    else:
-        with cache_lock:
-            exif_cache = {}
-
-def save_cache():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('SELECT file_path, has_exif FROM exif_cache')
+    rows = c.fetchall()
     with cache_lock:
-        data = exif_cache.copy()
-    with open(CACHE_FILE, 'w') as f:
-        json.dump(data, f)
+        exif_cache = {row[0]: bool(row[1]) for row in rows}
+    conn.close()
+    app.logger.info(f"Cache loaded from DB: {len(exif_cache)} entries")
+
+def save_cache_to_db(file_path, has_exif):
+    """Egy fájl cache-ének mentése az adatbázisba."""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('REPLACE INTO exif_cache VALUES (?, ?, ?)',
+              (file_path, 1 if has_exif else 0, datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
 
 def check_exif(file_path):
-    """Return (has_exif, exif_date_string)"""
+    """Ellenőrzi az EXIF-et, és frissíti a cache-t (memória + DB)."""
     try:
         import subprocess
         result = subprocess.run(
@@ -72,14 +78,65 @@ def check_exif(file_path):
             capture_output=True, text=True, timeout=2
         )
         has = result.returncode == 0 and result.stdout.strip() not in ('', '0000:00:00 00:00:00')
-        date_str = result.stdout.strip() if has else None
         with cache_lock:
             exif_cache[file_path] = has
-        return has, date_str
+        save_cache_to_db(file_path, has)
+        return has, result.stdout.strip() if has else None
     except Exception:
         with cache_lock:
             exif_cache[file_path] = False
+        save_cache_to_db(file_path, False)
         return False, None
+
+def get_exif_from_cache(file_path):
+    """Visszaadja a cache-ből a has_exif értéket (memória)."""
+    with cache_lock:
+        return exif_cache.get(file_path, False)
+
+def background_cache_refresh():
+    """Háttérszál: bejárja a fájlrendszert, és feltölti a cache-t alacsony prioritással."""
+    global background_refresh_running
+    app.logger.info("Background cache refresh started")
+    visited = set()
+    while background_refresh_running:
+        # Minden forrás mappát bejárunk
+        for source_path in WATCH_SOURCES:
+            source_path = source_path.strip()
+            if not os.path.exists(source_path):
+                continue
+            for dirpath, dirnames, filenames in os.walk(source_path):
+                for f in filenames:
+                    if f.lower().endswith(('.jpg', '.jpeg', '.png', '.mp4', '.mov', '.avi', '.jpe', '.jfif')):
+                        full = os.path.join(dirpath, f)
+                        if full in visited:
+                            continue
+                        visited.add(full)
+                        # Csak akkor frissítjük, ha nincs a cache-ben
+                        if not get_exif_from_cache(full):
+                            check_exif(full)
+                        # Alacsony prioritás: sleep a túlterhelés elkerülésére
+                        time.sleep(0.05)
+        # Ha minden fájlt feldolgoztunk, várjunk 10 percet, majd újrakezdjük (az új fájlok miatt)
+        for _ in range(600):  # 10 perc
+            if not background_refresh_running:
+                break
+            time.sleep(1)
+        visited.clear()
+    app.logger.info("Background cache refresh stopped")
+
+def start_background_refresh():
+    global background_refresh_running, background_refresh_thread
+    if background_refresh_running:
+        return
+    background_refresh_running = True
+    background_refresh_thread = threading.Thread(target=background_cache_refresh, daemon=True)
+    background_refresh_thread.start()
+
+def stop_background_refresh():
+    global background_refresh_running
+    background_refresh_running = False
+    if background_refresh_thread:
+        background_refresh_thread.join(timeout=5)
 
 def get_tree(root_path):
     tree = []
@@ -92,15 +149,14 @@ def get_tree(root_path):
     return sorted(tree)
 
 def get_files_in_dir(dir_path, limit=20, offset=0, missing_only=False):
-    """Csak a fájlokat listázza, NEM hív exiftool-t!"""
+    """Csak a fájlokat listázza, NEM hív exiftool-t. A has_exif a cache-ből jön."""
     files = []
     all_files = []
     try:
         for entry in os.scandir(dir_path):
             if entry.is_file() and entry.name.lower().endswith(('.jpg', '.jpeg', '.png', '.mp4', '.mov', '.avi', '.jpe', '.jfif')):
                 full = entry.path
-                with cache_lock:
-                    has_exif = exif_cache.get(full, False)
+                has_exif = get_exif_from_cache(full)
                 if missing_only and has_exif:
                     continue
                 all_files.append({
@@ -157,7 +213,7 @@ def fix_file(file_path, overwrite=False):
     if not estimated:
         return {'error': 'No date in filename'}
     if not overwrite:
-        has, _ = check_exif(file_path)
+        has = get_exif_from_cache(file_path)
         if has:
             return {'skipped': 'EXIF already exists'}
     import subprocess
@@ -168,9 +224,10 @@ def fix_file(file_path, overwrite=False):
            file_path]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode == 0:
+        # Frissítjük a cache-t
         with cache_lock:
             exif_cache[file_path] = True
-        save_cache()
+        save_cache_to_db(file_path, True)
         return {'success': True, 'date': estimated}
     else:
         return {'error': result.stderr}
@@ -194,7 +251,7 @@ def watchdog_worker_func(source_idx, root_path):
         try:
             file_path = q.get(timeout=1)
             time.sleep(0.3)
-            has, _ = check_exif(file_path)
+            has = get_exif_from_cache(file_path)
             if not has:
                 fix_file(file_path, overwrite=False)
         except queue.Empty:
@@ -259,6 +316,22 @@ def stop_watchdog_for_source(source_idx):
     save_watchdog_state(source_idx)
     return True
 
+def load_watchdog_states():
+    global watchdog_states
+    for i in range(len(WATCH_SOURCES)):
+        state_file = os.path.join(STATE_DIR, f'watchdog_{i}.state')
+        if os.path.exists(state_file):
+            with open(state_file, 'r') as f:
+                watchdog_states[i] = f.read().strip().lower() == 'true'
+        else:
+            watchdog_states[i] = False
+
+def save_watchdog_state(source_idx):
+    state_file = os.path.join(STATE_DIR, f'watchdog_{source_idx}.state')
+    with open(state_file, 'w') as f:
+        f.write('true' if watchdog_states.get(source_idx, False) else 'false')
+
+# Flask API
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -294,12 +367,31 @@ def api_browse():
         f['estimated'] = extract_date_from_filename(f['path'])
     return jsonify({'files': files, 'total': total})
 
+@app.route('/api/image/<path:file_path>')
+def api_image(file_path):
+    """Visszaadja a képfájlt (a watch directoryn belül)."""
+    # A file_path relatív a watch directory gyökeréhez képest? 
+    # A frontend a fájl teljes abszolút elérési útját adja át. Biztonsági okokból ellenőrizzük, hogy a watch directoryk alatt van-e.
+    full = os.path.abspath(file_path)
+    allowed = False
+    for source in WATCH_SOURCES:
+        src = os.path.abspath(source.strip())
+        if full.startswith(src):
+            allowed = True
+            break
+    if not allowed:
+        return '', 403
+    if not os.path.exists(full):
+        return '', 404
+    return send_file(full, conditional=True)
+
 @app.route('/api/exif', methods=['GET'])
 def api_exif():
     file_path = request.args.get('file')
     if not file_path or not os.path.exists(file_path):
         return jsonify({'error': 'File not found'}), 404
-    _, exif_date = check_exif(file_path)
+    # Frissítjük a cache-t (ha szükséges)
+    has, exif_date = check_exif(file_path)
     return jsonify({'exif_date': exif_date})
 
 @app.route('/api/fix', methods=['POST'])
@@ -320,9 +412,10 @@ def api_fix():
                file_path]
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode == 0:
+            # Frissítjük a cache-t
             with cache_lock:
                 exif_cache[file_path] = True
-            save_cache()
+            save_cache_to_db(file_path, True)
             return jsonify({'success': True})
         else:
             return jsonify({'error': result.stderr}), 500
@@ -386,9 +479,11 @@ def api_stop_watchdog():
         return jsonify({'error': 'Could not stop watchdog'}), 500
 
 if __name__ == '__main__':
-    load_cache()
+    load_cache_from_db()
     load_watchdog_states()
     for idx, enabled in watchdog_states.items():
         if enabled:
             start_watchdog_for_source(idx)
+    # Indítjuk a háttérfeltöltő szálat
+    start_background_refresh()
     app.run(host='0.0.0.0', port=5000, debug=False)
