@@ -76,6 +76,14 @@ h1 {
     font-weight: bold;
     margin-bottom: 10px;
     color: #20c997;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.watch-checkbox {
+    font-weight: normal;
+    font-size: 0.9rem;
+    color: #e0e0e0;
 }
 .tree-item {
     cursor: pointer;
@@ -83,6 +91,16 @@ h1 {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    transition: all 0.2s;
+}
+.tree-item.selected {
+    color: #fff;
+    font-weight: bold;
+}
+.tree-item:not(.selected) {
+    color: #fdfdfd;
+    opacity: 0.75;
+    font-weight: normal;
 }
 .tree-item:hover {
     background: #3a3a3a;
@@ -131,35 +149,25 @@ tr:hover {
 }
 .pagination {
     display: flex;
+    justify-content: center;
     gap: 5px;
     align-items: center;
+    margin-bottom: 15px;
 }
 .pagination button {
     background: #3a3a3a;
     color: #e0e0e0;
     padding: 4px 8px;
+    min-width: 32px;
 }
 .pagination button.active {
     background: #20c997;
     color: #1e1e1e;
-}
-.console {
-    margin-top: 20px;
-    background: #1a1a1a;
-    border-radius: 12px;
-    padding: 10px;
-}
-.console-header {
-    display: flex;
-    justify-content: space-between;
-    margin-bottom: 8px;
     font-weight: bold;
 }
-pre {
-    margin: 0;
-    font-size: 0.8rem;
-    white-space: pre-wrap;
-    word-wrap: break-word;
+.pagination button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 }
 @media (max-width: 768px) {
     .main-panel {

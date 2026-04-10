@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>IVERBS 0.2</title>
+    <title>IVERBS 0.2.5</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
@@ -11,8 +11,6 @@
     <nav>
         <h1>IVERBS</h1>
         <div class="nav-buttons">
-            <button id="startWatchdog" class="btn">▶ Watch</button>
-            <button id="stopWatchdog" class="btn">⏹️ Watch</button>
             <button id="refreshCache" class="btn">⟳ Refresh cache</button>
         </div>
     </nav>
@@ -21,7 +19,12 @@
 
     <div class="main-panel">
         <div class="tree-panel" id="treePanel">
-            <div class="tree-header">📁 Folders</div>
+            <div class="tree-header">
+                <span>📁 Folders</span>
+                <label class="watch-checkbox" style="margin-left: auto; display: flex; align-items: center; gap: 5px;">
+                    <input type="checkbox" id="watchToggle"> Watch
+                </label>
+            </div>
             <div id="tree"></div>
         </div>
         <div class="content-panel">
@@ -29,24 +32,18 @@
                 <div class="pagination" id="pagination"></div>
                 <div class="filter">
                     <label><input type="checkbox" id="missingOnly"> Missing only</label>
-                    <label><input type="checkbox" id="overwriteFix"> Overwrite</label>
-                    <button id="autoFixBtn" class="btn">Auto Fix (this page)</button>
+                    <button id="autoFixBtn" class="btn">Write</button>
                 </div>
             </div>
             <div class="file-list">
-                <table>
+                <table id="fileTable" style="width: 100%;">
                     <thead>
                         <tr><th>Name</th><th>Estimated date</th><th>EXIF?</th><th>Action</th></tr>
                     </thead>
-                    <tbody id="fileTable"></tbody>
+                    <tbody></tbody>
                 </table>
             </div>
         </div>
-    </div>
-
-    <div class="console">
-        <div class="console-header">Console <button id="clearConsole" class="btn-small">Clear</button></div>
-        <pre id="consoleOutput"></pre>
     </div>
 </div>
 
