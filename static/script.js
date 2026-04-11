@@ -101,7 +101,8 @@ async function loadFiles() {
         const row = tbody.insertRow();
         const nameCell = row.insertCell(0);
         const nameLink = document.createElement('a');
-        nameLink.href = `/api/image/${encodeURIComponent(f.path)}`;
+        // Új végpont: /api/image/<source_idx>/<rel_path>
+        nameLink.href = `/api/image/${currentSource}/${encodeURIComponent(f.rel_path)}`;
         nameLink.target = '_blank';
         nameLink.textContent = f.name;
         nameLink.style.color = '#20c997';
@@ -230,11 +231,9 @@ function renderPagination() {
         paginationDiv.appendChild(btn);
     }
 
-    // Első és előző
     addButton('<<', 1, false, currentPage === 1);
     addButton('<', currentPage - 1, false, currentPage === 1);
 
-    // Oldalszámok intelligens listája
     let pages = [];
     if (totalPages <= 5) {
         for (let i = 1; i <= totalPages; i++) pages.push(i);
@@ -260,7 +259,6 @@ function renderPagination() {
         }
     }
 
-    // Következő és utolsó
     addButton('>', currentPage + 1, false, currentPage === totalPages);
     addButton('>>', totalPages, false, currentPage === totalPages);
 }

@@ -106,8 +106,7 @@ def background_cache_refresh():
                         visited.add(full)
                         if not get_exif_from_cache(full):
                             check_exif(full)
-                        time.sleep(0.05)  # alacsony prioritás
-        # 10 perc várakozás újrakezdés előtt
+                        time.sleep(0.05)
         for _ in range(600):
             if not background_refresh_running:
                 break
@@ -149,6 +148,9 @@ def get_files_in_dir(dir_path, limit=20, offset=0, missing_only=False):
                 has_exif = get_exif_from_cache(full)
                 if missing_only and has_exif:
                     continue
+                # Relatív útvonal a gyökérhez képest (a WATCH_SOURCES aktuális eleméhez)
+                # Ehhez tudnunk kell, melyik source alatt van. A hívó (api_browse) majd átadja a source_idx-t.
+                # Itt most csak a fájlnevet adjuk vissza; a relatív útvonalat később számoljuk.
                 all_files.append({
                     'name': entry.name,
                     'path': full,
@@ -354,20 +356,18 @@ def api_browse():
     files, total = get_files_in_dir(full_path, limit, offset, missing_only)
     for f in files:
         f['estimated'] = extract_date_from_filename(f['path'])
+        # Relatív útvonal a gyökérhez (a WATCH_SOURCES[source_idx]-hez képest)
+        rel = os.path.relpath(f['path'], start=root)
+        f['rel_path'] = rel
     return jsonify({'files': files, 'total': total})
 
-@app.route('/api/image/<path:file_path>')
-def api_image(file_path):
-    full = os.path.abspath(file_path)
-    allowed = False
-    for source in WATCH_SOURCES:
-        src = os.path.abspath(source.strip())
-        if full.startswith(src):
-            allowed = True
-            break
-    if not allowed:
+@app.route('/api/image/<int:source_idx>/<path:rel_path>')
+def api_image(source_idx, rel_path):
+    if source_idx >= len(WATCH_SOURCES):
         return '', 403
-    if not os.path.exists(full):
+    root = WATCH_SOURCES[source_idx].strip()
+    full = os.path.join(root, rel_path)
+    if not os.path.exists(full) or not os.path.isfile(full):
         return '', 404
     return send_file(full, conditional=True)
 
