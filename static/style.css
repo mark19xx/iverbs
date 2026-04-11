@@ -119,12 +119,30 @@ h1 {
 .pagination-container {
     width: 100%;
     margin-bottom: 15px;
+    overflow-x: auto;
 }
 .pagination {
     display: flex;
     justify-content: center;
-    gap: 5px;
     align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+}
+.pagination button {
+    background: #3a3a3a;
+    color: #e0e0e0;
+    padding: 4px 8px;
+    min-width: 32px;
+    flex-shrink: 0;
+}
+.pagination button.active {
+    background: #20c997;
+    color: #1e1e1e;
+    font-weight: bold;
+}
+.pagination button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 }
 .filter-container {
     width: 100%;
@@ -160,21 +178,6 @@ th {
 tr:hover {
     background: #3a3a3a;
 }
-.pagination button {
-    background: #3a3a3a;
-    color: #e0e0e0;
-    padding: 4px 8px;
-    min-width: 32px;
-}
-.pagination button.active {
-    background: #20c997;
-    color: #1e1e1e;
-    font-weight: bold;
-}
-.pagination button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
 @media (max-width: 768px) {
     .main-panel {
         flex-direction: column;
@@ -185,5 +188,10 @@ tr:hover {
     .filter {
         flex-direction: column;
         gap: 8px;
+    }
+    .pagination button {
+        padding: 2px 6px;
+        min-width: 28px;
+        font-size: 0.7rem;
     }
 }

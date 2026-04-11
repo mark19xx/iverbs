@@ -101,7 +101,6 @@ async function loadFiles() {
         const row = tbody.insertRow();
         const nameCell = row.insertCell(0);
         const nameLink = document.createElement('a');
-        // Használjuk az /api/image végpontot a fájl eléréséhez
         nameLink.href = `/api/image/${encodeURIComponent(f.path)}`;
         nameLink.target = '_blank';
         nameLink.textContent = f.name;
@@ -214,33 +213,56 @@ function renderPagination() {
     const totalPages = Math.ceil(totalFiles / pageSize);
     const paginationDiv = document.getElementById('pagination');
     paginationDiv.innerHTML = '';
-    const first = document.createElement('button');
-    first.textContent = '<<';
-    first.disabled = (currentPage === 1);
-    first.onclick = () => { if (currentPage > 1) { currentPage = 1; loadFiles(); } };
-    paginationDiv.appendChild(first);
-    const prev = document.createElement('button');
-    prev.textContent = '<';
-    prev.disabled = (currentPage === 1);
-    prev.onclick = () => { if (currentPage > 1) { currentPage--; loadFiles(); } };
-    paginationDiv.appendChild(prev);
-    for (let i = 1; i <= totalPages; i++) {
+
+    if (totalPages === 0) return;
+
+    function addButton(label, page, isActive = false, disabled = false) {
         const btn = document.createElement('button');
-        btn.textContent = i;
-        if (i === currentPage) btn.classList.add('active');
-        btn.onclick = () => { currentPage = i; loadFiles(); };
+        btn.textContent = label;
+        if (disabled) btn.disabled = true;
+        if (isActive) btn.classList.add('active');
+        btn.onclick = () => {
+            if (page !== currentPage) {
+                currentPage = page;
+                loadFiles();
+            }
+        };
         paginationDiv.appendChild(btn);
     }
-    const next = document.createElement('button');
-    next.textContent = '>';
-    next.disabled = (currentPage === totalPages);
-    next.onclick = () => { if (currentPage < totalPages) { currentPage++; loadFiles(); } };
-    paginationDiv.appendChild(next);
-    const last = document.createElement('button');
-    last.textContent = '>>';
-    last.disabled = (currentPage === totalPages);
-    last.onclick = () => { if (currentPage < totalPages) { currentPage = totalPages; loadFiles(); } };
-    paginationDiv.appendChild(last);
+
+    // Első és előző
+    addButton('<<', 1, false, currentPage === 1);
+    addButton('<', currentPage - 1, false, currentPage === 1);
+
+    // Oldalszámok intelligens listája
+    let pages = [];
+    if (totalPages <= 5) {
+        for (let i = 1; i <= totalPages; i++) pages.push(i);
+    } else {
+        pages.push(1);
+        if (currentPage > 3) pages.push('...');
+        for (let i = Math.max(2, currentPage - 1); i <= Math.min(totalPages - 1, currentPage + 1); i++) {
+            if (!pages.includes(i)) pages.push(i);
+        }
+        if (currentPage < totalPages - 2) pages.push('...');
+        pages.push(totalPages);
+    }
+
+    for (let p of pages) {
+        if (p === '...') {
+            const span = document.createElement('span');
+            span.textContent = '...';
+            span.style.margin = '0 4px';
+            span.style.color = '#888';
+            paginationDiv.appendChild(span);
+        } else {
+            addButton(p.toString(), p, p === currentPage, false);
+        }
+    }
+
+    // Következő és utolsó
+    addButton('>', currentPage + 1, false, currentPage === totalPages);
+    addButton('>>', totalPages, false, currentPage === totalPages);
 }
 
 async function updateWatchdogStatus() {

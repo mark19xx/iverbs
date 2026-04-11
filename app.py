@@ -1,5 +1,4 @@
 import os
-import json
 import sqlite3
 import time
 import threading
@@ -29,7 +28,7 @@ def init_db():
     conn.close()
 init_db()
 
-# Memória cache (a memóriabeli gyorsítás érdekében)
+# Memória cache
 exif_cache = {}
 cache_lock = threading.Lock()
 
@@ -44,12 +43,11 @@ watchdog_queues = {}
 watchdog_workers = {}
 watchdog_states = {}
 
-# Háttérfeltöltő szál a cache frissítéséhez (alacsony prioritás)
+# Háttérfeltöltő szál
 background_refresh_running = False
 background_refresh_thread = None
 
 def load_cache_from_db():
-    """Betölti a teljes cache-t az adatbázisból a memóriába."""
     global exif_cache
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -61,7 +59,6 @@ def load_cache_from_db():
     app.logger.info(f"Cache loaded from DB: {len(exif_cache)} entries")
 
 def save_cache_to_db(file_path, has_exif):
-    """Egy fájl cache-ének mentése az adatbázisba."""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('REPLACE INTO exif_cache VALUES (?, ?, ?)',
@@ -70,7 +67,6 @@ def save_cache_to_db(file_path, has_exif):
     conn.close()
 
 def check_exif(file_path):
-    """Ellenőrzi az EXIF-et, és frissíti a cache-t (memória + DB)."""
     try:
         import subprocess
         result = subprocess.run(
@@ -89,17 +85,14 @@ def check_exif(file_path):
         return False, None
 
 def get_exif_from_cache(file_path):
-    """Visszaadja a cache-ből a has_exif értéket (memória)."""
     with cache_lock:
         return exif_cache.get(file_path, False)
 
 def background_cache_refresh():
-    """Háttérszál: bejárja a fájlrendszert, és feltölti a cache-t alacsony prioritással."""
     global background_refresh_running
     app.logger.info("Background cache refresh started")
     visited = set()
     while background_refresh_running:
-        # Minden forrás mappát bejárunk
         for source_path in WATCH_SOURCES:
             source_path = source_path.strip()
             if not os.path.exists(source_path):
@@ -111,13 +104,11 @@ def background_cache_refresh():
                         if full in visited:
                             continue
                         visited.add(full)
-                        # Csak akkor frissítjük, ha nincs a cache-ben
                         if not get_exif_from_cache(full):
                             check_exif(full)
-                        # Alacsony prioritás: sleep a túlterhelés elkerülésére
-                        time.sleep(0.05)
-        # Ha minden fájlt feldolgoztunk, várjunk 10 percet, majd újrakezdjük (az új fájlok miatt)
-        for _ in range(600):  # 10 perc
+                        time.sleep(0.05)  # alacsony prioritás
+        # 10 perc várakozás újrakezdés előtt
+        for _ in range(600):
             if not background_refresh_running:
                 break
             time.sleep(1)
@@ -149,7 +140,6 @@ def get_tree(root_path):
     return sorted(tree)
 
 def get_files_in_dir(dir_path, limit=20, offset=0, missing_only=False):
-    """Csak a fájlokat listázza, NEM hív exiftool-t. A has_exif a cache-ből jön."""
     files = []
     all_files = []
     try:
@@ -224,7 +214,6 @@ def fix_file(file_path, overwrite=False):
            file_path]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode == 0:
-        # Frissítjük a cache-t
         with cache_lock:
             exif_cache[file_path] = True
         save_cache_to_db(file_path, True)
@@ -369,9 +358,6 @@ def api_browse():
 
 @app.route('/api/image/<path:file_path>')
 def api_image(file_path):
-    """Visszaadja a képfájlt (a watch directoryn belül)."""
-    # A file_path relatív a watch directory gyökeréhez képest? 
-    # A frontend a fájl teljes abszolút elérési útját adja át. Biztonsági okokból ellenőrizzük, hogy a watch directoryk alatt van-e.
     full = os.path.abspath(file_path)
     allowed = False
     for source in WATCH_SOURCES:
@@ -390,7 +376,6 @@ def api_exif():
     file_path = request.args.get('file')
     if not file_path or not os.path.exists(file_path):
         return jsonify({'error': 'File not found'}), 404
-    # Frissítjük a cache-t (ha szükséges)
     has, exif_date = check_exif(file_path)
     return jsonify({'exif_date': exif_date})
 
@@ -400,7 +385,6 @@ def api_fix():
     file_path = data.get('file')
     new_date = data.get('date')
     if new_date:
-        # Manual edit
         if not os.path.exists(file_path):
             return jsonify({'error': 'File not found'}), 400
         estimated = new_date + ' 00:00:00'
@@ -412,7 +396,6 @@ def api_fix():
                file_path]
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode == 0:
-            # Frissítjük a cache-t
             with cache_lock:
                 exif_cache[file_path] = True
             save_cache_to_db(file_path, True)
@@ -484,6 +467,5 @@ if __name__ == '__main__':
     for idx, enabled in watchdog_states.items():
         if enabled:
             start_watchdog_for_source(idx)
-    # Indítjuk a háttérfeltöltő szálat
     start_background_refresh()
     app.run(host='0.0.0.0', port=5000, debug=False)
