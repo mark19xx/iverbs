@@ -18,7 +18,6 @@ os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(STATE_DIR, exist_ok=True)
 os.makedirs('/data/db', exist_ok=True)
 
-# SQLite inicializálás
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -28,22 +27,18 @@ def init_db():
     conn.close()
 init_db()
 
-# Memória cache
 exif_cache = {}
 cache_lock = threading.Lock()
 
-# Task manager for progress polling
 tasks = {}
 tasks_lock = threading.Lock()
 task_counter = 0
 
-# Watchdog per source
 observers = {}
 watchdog_queues = {}
 watchdog_workers = {}
 watchdog_states = {}
 
-# Háttérfeltöltő szál
 background_refresh_running = False
 background_refresh_thread = None
 
@@ -106,7 +101,7 @@ def background_cache_refresh():
                         visited.add(full)
                         if not get_exif_from_cache(full):
                             check_exif(full)
-                        time.sleep(0.05)
+                        time.sleep(0.1)  # Módosítva: 0.1 másodperc (régen 0.05)
         for _ in range(600):
             if not background_refresh_running:
                 break
@@ -148,9 +143,6 @@ def get_files_in_dir(dir_path, limit=20, offset=0, missing_only=False):
                 has_exif = get_exif_from_cache(full)
                 if missing_only and has_exif:
                     continue
-                # Relatív útvonal a gyökérhez képest (a WATCH_SOURCES aktuális eleméhez)
-                # Ehhez tudnunk kell, melyik source alatt van. A hívó (api_browse) majd átadja a source_idx-t.
-                # Itt most csak a fájlnevet adjuk vissza; a relatív útvonalat később számoljuk.
                 all_files.append({
                     'name': entry.name,
                     'path': full,
@@ -235,7 +227,6 @@ def batch_fix_task(task_id, files, overwrite):
     with tasks_lock:
         tasks[task_id]['status'] = 'completed'
 
-# Watchdog worker
 def watchdog_worker_func(source_idx, root_path):
     q = watchdog_queues[source_idx]
     while True:
@@ -322,7 +313,6 @@ def save_watchdog_state(source_idx):
     with open(state_file, 'w') as f:
         f.write('true' if watchdog_states.get(source_idx, False) else 'false')
 
-# Flask API
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -356,7 +346,6 @@ def api_browse():
     files, total = get_files_in_dir(full_path, limit, offset, missing_only)
     for f in files:
         f['estimated'] = extract_date_from_filename(f['path'])
-        # Relatív útvonal a gyökérhez (a WATCH_SOURCES[source_idx]-hez képest)
         rel = os.path.relpath(f['path'], start=root)
         f['rel_path'] = rel
     return jsonify({'files': files, 'total': total})

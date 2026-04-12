@@ -50,6 +50,8 @@ h1 {
     padding: 4px 8px;
     border-radius: 4px;
     cursor: pointer;
+    min-width: 70px;  /* egyforma szélesség asztali nézetben */
+    text-align: center;
 }
 .tabs {
     display: flex;
@@ -179,6 +181,9 @@ tr:hover {
     background: #3a3a3a;
 }
 @media (max-width: 768px) {
+    body {
+        padding: 0 !important;
+    }
     .main-panel {
         flex-direction: column;
     }
@@ -193,5 +198,16 @@ tr:hover {
         padding: 2px 6px;
         min-width: 28px;
         font-size: 0.7rem;
+    }
+    /* Fix és Edit gombok egymás alá mobilban */
+    td:last-child {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        align-items: stretch;
+    }
+    .btn-small {
+        width: 100%;
+        text-align: center;
     }
 }
