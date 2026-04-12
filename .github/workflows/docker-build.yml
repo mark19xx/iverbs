@@ -1,8 +1,6 @@
-name: Go Build to GHCR
+name: Create GitHub Release
 
 on:
-  push:
-    branches: [ "main", "master" ]
   workflow_dispatch:
     inputs:
       version:
@@ -12,11 +10,11 @@ on:
         type: string
 
 jobs:
-  build-and-push:
+  create-release:
     runs-on: ubuntu-latest
     permissions:
+      contents: write
       packages: write
-      contents: read
 
     steps:
       - name: Checkout kód
@@ -29,13 +27,22 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Docker képfájl megépítése és feltöltése
+      - name: Docker image build és push
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
           tags: |
             ghcr.io/${{ github.repository_owner }}/iverbs:latest
-            ghcr.io/${{ github.repository_owner }}/iverbs:${{ github.sha }}
-            ghcr.io/${{ github.repository_owner }}/iverbs:${{ github.ref_name }}
             ghcr.io/${{ github.repository_owner }}/iverbs:${{ inputs.version }}
+            ghcr.io/${{ github.repository_owner }}/iverbs:${{ github.sha }}
+
+      - name: GitHub Release létrehozása
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.version }}
+          name: IVERBS ${{ inputs.version }}
+          body: |
+            IVERBS ${{ inputs.version }} – Go backend, hatékonyabb watchdog, SQLite cache
+          draft: false
+          prerelease: false
