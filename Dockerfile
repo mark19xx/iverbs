@@ -3,7 +3,7 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o iverbs .
+RUN go build -o iverbs .
 
 FROM alpine:3.19
 RUN apk add --no-cache exiftool inotify-tools sqlite
