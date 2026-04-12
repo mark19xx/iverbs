@@ -1,24 +1,19 @@
-FROM alpine:3.19
-
-RUN apk add --no-cache \
-    python3 \
-    py3-pip \
-    exiftool \
-    inotify-tools \
-    && rm -rf /var/cache/apk/*
-
+# Build stage
+FROM golang:1.21-alpine AS builder
 WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN go build -o iverbs .
 
-COPY requirements.txt .
-RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
-
-COPY app.py .
+# Runtime stage
+FROM alpine:3.19
+RUN apk add --no-cache exiftool inotify-tools
+WORKDIR /app
+COPY --from=builder /app/iverbs .
 COPY templates/ ./templates/
 COPY static/ ./static/
-
 RUN mkdir -p /data/cache /data/logs /data/state /data/db
 VOLUME ["/data"]
-
 EXPOSE 5000
-
-CMD ["python3", "app.py"]
+CMD ["./iverbs"]
