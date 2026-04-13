@@ -21,7 +21,7 @@ import (
     _ "github.com/mattn/go-sqlite3"
 )
 
-const version = "0.3.0"
+const version = "0.3.1" // Frissítve
 
 var (
     watchSources   []string
@@ -38,7 +38,7 @@ var (
     stateMutex     sync.RWMutex
 )
 
-// SSE broker
+// SSE broker (változatlan)
 type SSEEvent struct {
     Source  int  `json:"source"`
     Running bool `json:"running"`
@@ -374,7 +374,6 @@ func startWatchdogForSource(sourceIdx int) error {
         return err
     }
 
-    // Add directory recursively
     err = filepath.Walk(rootPath, func(path string, info os.FileInfo, err error) error {
         if err != nil {
             return nil
@@ -409,7 +408,6 @@ func startWatchdogForSource(sourceIdx int) error {
                     event.Op&fsnotify.Write == fsnotify.Write {
                     eventQueue <- event.Name
                 } else if event.Op&fsnotify.Remove == fsnotify.Remove {
-                    // Delete from cache
                     setExifCache(event.Name, false)
                 }
             case err, ok := <-watcher.Errors:
@@ -423,7 +421,7 @@ func startWatchdogForSource(sourceIdx int) error {
 
     go func() {
         for filePath := range eventQueue {
-            time.Sleep(300 * time.Millisecond) // rate limiting
+            time.Sleep(300 * time.Millisecond)
             has, _ := checkExif(filePath)
             if !has {
                 fixFile(filePath, false)
@@ -525,6 +523,7 @@ func main() {
 
     go backgroundCacheRefresh()
 
+    // Egyszerűsített sablon (nincs szükség json függvényre)
     tmpl := template.Must(template.ParseGlob("templates/*.html"))
     http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 
@@ -727,7 +726,6 @@ func main() {
         eventChan := make(chan SSEEvent)
         sseBroker.newClients <- eventChan
 
-        // Küldjük el az aktuális állapotot minden forrásról a csatlakozáskor
         stateMutex.RLock()
         for idx, running := range watchdogStates {
             eventChan <- SSEEvent{Source: idx, Running: running}
