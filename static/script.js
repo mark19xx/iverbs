@@ -10,6 +10,19 @@ let pollingInterval = null;
 let currentTaskId = null;
 let sseConnection = null;
 
+// Inicializáláskor betöltjük az összes watchdog állapotot
+async function loadAllWatchdogStates() {
+    try {
+        const res = await fetch('/api/watchdog_states');
+        const states = await res.json();
+        watchEnabled = states; // tömb: [true, false, ...] a források sorrendjében
+        updateWatchToggleUI();
+    } catch (err) {
+        console.error('Failed to load watchdog states', err);
+        watchEnabled = [];
+    }
+}
+
 async function loadTabs() {
     const res = await fetch('/api/sources');
     const sources = await res.json();
@@ -22,21 +35,23 @@ async function loadTabs() {
         tab.onclick = () => switchSource(idx);
         tabsDiv.appendChild(tab);
     });
-    // Lekérjük az összes watchdog állapotot a szerverről
-    const statesRes = await fetch('/api/watchdog_states');
-    const states = await statesRes.json();
-    watchEnabled = states;
+    // A watchEnabled tömb már betöltődött a loadAllWatchdogStates-ben,
+    // de ha esetleg nem, itt is betöltjük
+    if (watchEnabled.length === 0) {
+        await loadAllWatchdogStates();
+    }
     updateWatchToggleUI();
 }
 
 function switchSource(idx) {
+    if (idx === currentSource) return;
     currentSource = idx;
     currentPath = '';
     currentPage = 1;
     loadTree();
     loadFiles();
     highlightActiveTab();
-    updateWatchToggleUI();
+    updateWatchToggleUI(); // fontos: frissíti a checkbox-ot az aktuális tab állapotára
 }
 
 function highlightActiveTab() {
@@ -268,7 +283,7 @@ function renderPagination() {
 
 function updateWatchToggleUI() {
     const toggle = document.getElementById('watchToggle');
-    if (toggle) {
+    if (toggle && watchEnabled.length > currentSource) {
         toggle.checked = watchEnabled[currentSource] || false;
     }
 }
@@ -287,9 +302,8 @@ async function toggleWatchdog() {
         alert('Failed to toggle watchdog');
         toggle.checked = !newState;
     } else {
-        // Az SSE majd frissíti a watchEnabled tömböt
-        // De azonnal frissíthetjük a lokális állapotot is
         watchEnabled[currentSource] = newState;
+        // Az SSE majd frissíti a többi böngészőt
     }
 }
 
@@ -303,10 +317,8 @@ function connectSSE() {
     sseConnection.onmessage = (event) => {
         try {
             const data = JSON.parse(event.data);
-            // Frissítjük a watchEnabled tömböt
             if (data.source >= 0 && data.source < watchEnabled.length) {
                 watchEnabled[data.source] = data.running;
-                // Ha ez az aktuális tab, frissítsük a checkboxot
                 if (data.source === currentSource) {
                     const toggle = document.getElementById('watchToggle');
                     if (toggle && toggle.checked !== data.running) {
@@ -326,14 +338,12 @@ function connectSSE() {
     };
 }
 
-// Kapcsolat lezárása oldal bezárásakor
 window.addEventListener('beforeunload', () => {
     if (sseConnection) {
         sseConnection.close();
     }
 });
 
-// --- Eseménykezelők ---
 document.getElementById('missingOnly').addEventListener('change', (e) => {
     missingOnly = e.target.checked;
     currentPage = 1;
@@ -343,7 +353,10 @@ document.getElementById('autoFixBtn').addEventListener('click', startBatchFix);
 document.getElementById('watchToggle').addEventListener('change', toggleWatchdog);
 
 // --- Inicializálás ---
-loadTabs();
-loadTree();
-loadFiles();
-connectSSE();
+(async function init() {
+    await loadAllWatchdogStates(); // először betöltjük a watchdog állapotokat
+    await loadTabs();              // majd a tabokat (a watchEnabled már kész)
+    loadTree();
+    loadFiles();
+    connectSSE();
+})();
