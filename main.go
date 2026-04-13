@@ -21,12 +21,11 @@ import (
     _ "github.com/mattn/go-sqlite3"
 )
 
-const version = "0.3.1" // Frissítve
+const version = "0.3.2"
 
 var (
     watchSources   []string
     dbPath         = "/data/db/iverbs.db"
-    stateDir       = "/data/state"
     exifCache      = make(map[string]bool)
     cacheMutex     sync.RWMutex
     tasks          = make(map[int]*Task)
@@ -34,61 +33,9 @@ var (
     taskCounter    = 0
     observers      = make(map[int]*fsnotify.Watcher)
     watchdogQueues = make(map[int]chan string)
-    watchdogStates = make(map[int]bool)
-    stateMutex     sync.RWMutex
+    // watchdog delay from environment (default 300ms)
+    watchdogDelay  = 300 * time.Millisecond
 )
-
-// SSE broker (változatlan)
-type SSEEvent struct {
-    Source  int  `json:"source"`
-    Running bool `json:"running"`
-}
-
-type SSEBroker struct {
-    clients        map[chan SSEEvent]bool
-    newClients     chan chan SSEEvent
-    closingClients chan chan SSEEvent
-    events         chan SSEEvent
-    mutex          sync.Mutex
-}
-
-func NewSSEBroker() *SSEBroker {
-    b := &SSEBroker{
-        clients:        make(map[chan SSEEvent]bool),
-        newClients:     make(chan chan SSEEvent),
-        closingClients: make(chan chan SSEEvent),
-        events:         make(chan SSEEvent),
-    }
-    go b.listen()
-    return b
-}
-
-func (b *SSEBroker) listen() {
-    for {
-        select {
-        case newCh := <-b.newClients:
-            b.mutex.Lock()
-            b.clients[newCh] = true
-            b.mutex.Unlock()
-        case closingCh := <-b.closingClients:
-            b.mutex.Lock()
-            delete(b.clients, closingCh)
-            b.mutex.Unlock()
-        case event := <-b.events:
-            b.mutex.Lock()
-            for ch := range b.clients {
-                ch <- event
-            }
-            b.mutex.Unlock()
-        }
-    }
-}
-
-func (b *SSEBroker) Broadcast(event SSEEvent) {
-    b.events <- event
-}
-
-var sseBroker = NewSSEBroker()
 
 type Task struct {
     Total     int    `json:"total"`
@@ -338,6 +285,27 @@ func getFilesInDir(dirPath string, limit, offset int, missingOnly bool) ([]FileI
     return allFiles[start:end], total
 }
 
+func collectFilesInPath(rootPath string) ([]string, error) {
+    var files []string
+    err := filepath.Walk(rootPath, func(path string, info os.FileInfo, err error) error {
+        if err != nil {
+            return nil
+        }
+        if info.IsDir() {
+            return nil
+        }
+        ext := strings.ToLower(filepath.Ext(path))
+        if ext != ".jpg" && ext != ".jpeg" && ext != ".png" &&
+            ext != ".mp4" && ext != ".mov" && ext != ".avi" &&
+            ext != ".jpe" && ext != ".jfif" {
+            return nil
+        }
+        files = append(files, path)
+        return nil
+    })
+    return files, err
+}
+
 func batchFixTask(taskID int, files []string, overwrite bool) {
     total := len(files)
     tasksMutex.Lock()
@@ -358,22 +326,20 @@ func batchFixTask(taskID int, files []string, overwrite bool) {
     tasksMutex.Unlock()
 }
 
-func startWatchdogForSource(sourceIdx int) error {
-    stateMutex.Lock()
-    defer stateMutex.Unlock()
-    if _, exists := observers[sourceIdx]; exists {
-        return nil
-    }
+func startWatchdogForSource(sourceIdx int, delay time.Duration) {
     rootPath := strings.TrimSpace(watchSources[sourceIdx])
     if _, err := os.Stat(rootPath); os.IsNotExist(err) {
-        return fmt.Errorf("path does not exist: %s", rootPath)
+        log.Printf("Watchdog: path does not exist, skipping %s", rootPath)
+        return
     }
 
     watcher, err := fsnotify.NewWatcher()
     if err != nil {
-        return err
+        log.Printf("Watchdog: failed to create watcher for %s: %v", rootPath, err)
+        return
     }
 
+    // Add directory recursively
     err = filepath.Walk(rootPath, func(path string, info os.FileInfo, err error) error {
         if err != nil {
             return nil
@@ -385,7 +351,8 @@ func startWatchdogForSource(sourceIdx int) error {
     })
     if err != nil {
         watcher.Close()
-        return err
+        log.Printf("Watchdog: failed to add directories for %s: %v", rootPath, err)
+        return
     }
 
     eventQueue := make(chan string, 100)
@@ -421,7 +388,7 @@ func startWatchdogForSource(sourceIdx int) error {
 
     go func() {
         for filePath := range eventQueue {
-            time.Sleep(300 * time.Millisecond)
+            time.Sleep(delay)
             has, _ := checkExif(filePath)
             if !has {
                 fixFile(filePath, false)
@@ -430,54 +397,13 @@ func startWatchdogForSource(sourceIdx int) error {
     }()
 
     observers[sourceIdx] = watcher
-    watchdogStates[sourceIdx] = true
-    saveWatchdogState(sourceIdx)
-    sseBroker.Broadcast(SSEEvent{Source: sourceIdx, Running: true})
-    return nil
+    log.Printf("Watchdog started for %s (delay %v)", rootPath, delay)
 }
 
-func stopWatchdogForSource(sourceIdx int) error {
-    stateMutex.Lock()
-    defer stateMutex.Unlock()
-    watcher, exists := observers[sourceIdx]
-    if !exists {
-        return nil
+func startAllWatchdogs(delay time.Duration) {
+    for idx := range watchSources {
+        startWatchdogForSource(idx, delay)
     }
-    if err := watcher.Close(); err != nil {
-        return err
-    }
-    delete(observers, sourceIdx)
-    if queue, ok := watchdogQueues[sourceIdx]; ok {
-        close(queue)
-        delete(watchdogQueues, sourceIdx)
-    }
-    watchdogStates[sourceIdx] = false
-    saveWatchdogState(sourceIdx)
-    sseBroker.Broadcast(SSEEvent{Source: sourceIdx, Running: false})
-    return nil
-}
-
-func loadWatchdogStates() {
-    stateMutex.Lock()
-    defer stateMutex.Unlock()
-    for i := range watchSources {
-        stateFile := filepath.Join(stateDir, fmt.Sprintf("watchdog_%d.state", i))
-        data, err := os.ReadFile(stateFile)
-        if err != nil {
-            watchdogStates[i] = false
-            continue
-        }
-        watchdogStates[i] = strings.TrimSpace(string(data)) == "true"
-    }
-}
-
-func saveWatchdogState(sourceIdx int) {
-    stateFile := filepath.Join(stateDir, fmt.Sprintf("watchdog_%d.state", sourceIdx))
-    val := "false"
-    if watchdogStates[sourceIdx] {
-        val = "true"
-    }
-    os.WriteFile(stateFile, []byte(val), 0644)
 }
 
 func backgroundCacheRefresh() {
@@ -485,14 +411,16 @@ func backgroundCacheRefresh() {
     for range ticker.C {
         log.Println("Starting periodic cache cleanup")
         cacheMutex.RLock()
+        paths := make([]string, 0, len(exifCache))
         for path := range exifCache {
-            if _, err := os.Stat(path); os.IsNotExist(err) {
-                cacheMutex.RUnlock()
-                setExifCache(path, false)
-                cacheMutex.RLock()
-            }
+            paths = append(paths, path)
         }
         cacheMutex.RUnlock()
+        for _, path := range paths {
+            if _, err := os.Stat(path); os.IsNotExist(err) {
+                setExifCache(path, false)
+            }
+        }
         log.Println("Periodic cache cleanup completed")
     }
 }
@@ -505,6 +433,15 @@ func main() {
         watchSources = strings.Split(watchSourcesEnv, ",")
     }
 
+    // Watchdog delay from environment (default 300ms)
+    delayMs := 300
+    if envDelay := os.Getenv("WATCHDOG_DELAY_MS"); envDelay != "" {
+        if d, err := strconv.Atoi(envDelay); err == nil && d > 0 {
+            delayMs = d
+        }
+    }
+    watchdogDelay = time.Duration(delayMs) * time.Millisecond
+
     if err := initDB(); err != nil {
         log.Fatalf("Failed to init DB: %v", err)
     }
@@ -512,18 +449,11 @@ func main() {
         log.Printf("Warning: Failed to load cache from DB: %v", err)
     }
 
-    loadWatchdogStates()
-    for idx, enabled := range watchdogStates {
-        if enabled {
-            if err := startWatchdogForSource(idx); err != nil {
-                log.Printf("Failed to start watchdog for source %d: %v", idx, err)
-            }
-        }
-    }
+    // Start watchdog for all sources (always on)
+    startAllWatchdogs(watchdogDelay)
 
     go backgroundCacheRefresh()
 
-    // Egyszerűsített sablon (nincs szükség json függvényre)
     tmpl := template.Must(template.ParseGlob("templates/*.html"))
     http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 
@@ -688,6 +618,40 @@ func main() {
         json.NewEncoder(w).Encode(map[string]interface{}{"task_id": taskID})
     })
 
+    http.HandleFunc("/api/batch_fix_path", func(w http.ResponseWriter, r *http.Request) {
+        if r.Method != "POST" {
+            http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+            return
+        }
+        var data map[string]interface{}
+        if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+            http.Error(w, "Invalid JSON", http.StatusBadRequest)
+            return
+        }
+        rootPath, ok := data["path"].(string)
+        if !ok || rootPath == "" {
+            http.Error(w, "Missing path parameter", http.StatusBadRequest)
+            return
+        }
+        overwrite, _ := data["overwrite"].(bool)
+        files, err := collectFilesInPath(rootPath)
+        if err != nil {
+            http.Error(w, err.Error(), http.StatusInternalServerError)
+            return
+        }
+        if len(files) == 0 {
+            json.NewEncoder(w).Encode(map[string]interface{}{"task_id": -1, "message": "No files found"})
+            return
+        }
+        tasksMutex.Lock()
+        taskCounter++
+        taskID := taskCounter
+        tasks[taskID] = &Task{Total: len(files), Processed: 0, Status: "running"}
+        tasksMutex.Unlock()
+        go batchFixTask(taskID, files, overwrite)
+        json.NewEncoder(w).Encode(map[string]interface{}{"task_id": taskID})
+    })
+
     http.HandleFunc("/api/task/", func(w http.ResponseWriter, r *http.Request) {
         parts := strings.Split(r.URL.Path, "/")
         if len(parts) < 4 {
@@ -709,103 +673,6 @@ func main() {
         json.NewEncoder(w).Encode(task)
     })
 
-    http.HandleFunc("/api/watchdog_status", func(w http.ResponseWriter, r *http.Request) {
-        sourceIdx, _ := strconv.Atoi(r.URL.Query().Get("source"))
-        stateMutex.RLock()
-        running := watchdogStates[sourceIdx]
-        stateMutex.RUnlock()
-        json.NewEncoder(w).Encode(map[string]interface{}{"running": running})
-    })
-
-    http.HandleFunc("/api/watchdog/events", func(w http.ResponseWriter, r *http.Request) {
-        w.Header().Set("Content-Type", "text/event-stream")
-        w.Header().Set("Cache-Control", "no-cache")
-        w.Header().Set("Connection", "keep-alive")
-        w.Header().Set("Access-Control-Allow-Origin", "*")
-
-        eventChan := make(chan SSEEvent)
-        sseBroker.newClients <- eventChan
-
-        stateMutex.RLock()
-        for idx, running := range watchdogStates {
-            eventChan <- SSEEvent{Source: idx, Running: running}
-        }
-        stateMutex.RUnlock()
-
-        flusher, ok := w.(http.Flusher)
-        if !ok {
-            http.Error(w, "SSE not supported", http.StatusInternalServerError)
-            return
-        }
-
-        ctx := r.Context()
-        for {
-            select {
-            case event := <-eventChan:
-                data, _ := json.Marshal(event)
-                fmt.Fprintf(w, "data: %s\n\n", data)
-                flusher.Flush()
-            case <-ctx.Done():
-                sseBroker.closingClients <- eventChan
-                return
-            }
-        }
-    })
-
-    http.HandleFunc("/api/start_watchdog", func(w http.ResponseWriter, r *http.Request) {
-        if r.Method != "POST" {
-            http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-            return
-        }
-        var data map[string]interface{}
-        if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
-            http.Error(w, "Invalid JSON", http.StatusBadRequest)
-            return
-        }
-        sourceIdx, ok := data["source"].(float64)
-        if !ok {
-            http.Error(w, "Missing source parameter", http.StatusBadRequest)
-            return
-        }
-        if err := startWatchdogForSource(int(sourceIdx)); err != nil {
-            http.Error(w, err.Error(), http.StatusInternalServerError)
-            return
-        }
-        json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
-    })
-
-    http.HandleFunc("/api/stop_watchdog", func(w http.ResponseWriter, r *http.Request) {
-        if r.Method != "POST" {
-            http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-            return
-        }
-        var data map[string]interface{}
-        if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
-            http.Error(w, "Invalid JSON", http.StatusBadRequest)
-            return
-        }
-        sourceIdx, ok := data["source"].(float64)
-        if !ok {
-            http.Error(w, "Missing source parameter", http.StatusBadRequest)
-            return
-        }
-        if err := stopWatchdogForSource(int(sourceIdx)); err != nil {
-            http.Error(w, err.Error(), http.StatusInternalServerError)
-            return
-        }
-        json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
-    })
-
-    http.HandleFunc("/api/watchdog_states", func(w http.ResponseWriter, r *http.Request) {
-        stateMutex.RLock()
-        defer stateMutex.RUnlock()
-        states := make([]bool, len(watchSources))
-        for i := 0; i < len(watchSources); i++ {
-            states[i] = watchdogStates[i]
-        }
-        json.NewEncoder(w).Encode(states)
-    })
-
-    log.Printf("IVERBS %s starting on :5000", version)
+    log.Printf("IVERBS %s starting on :5000 (watchdog delay: %v)", version, watchdogDelay)
     log.Fatal(http.ListenAndServe(":5000", nil))
 }

@@ -5,28 +5,8 @@ let pageSize = 20;
 let totalFiles = 0;
 let missingOnly = false;
 
-let watchEnabled = [];
 let pollingInterval = null;
 let currentTaskId = null;
-let sseConnection = null;
-
-// Watchdog állapotok betöltése – most már várjuk meg
-async function loadWatchdogStates() {
-    try {
-        const res = await fetch('/api/watchdog_states');
-        if (res.ok) {
-            const states = await res.json();
-            watchEnabled = states;
-        } else {
-            console.warn('Watchdog states endpoint returned error, using defaults');
-            watchEnabled = [];
-        }
-    } catch (err) {
-        console.warn('Could not load watchdog states, using defaults', err);
-        watchEnabled = [];
-    }
-    // Ha nem sikerült a betöltés, inicializáljunk üres tömböt (a tabok számát majd később állítjuk be)
-}
 
 async function loadTabs() {
     try {
@@ -43,11 +23,6 @@ async function loadTabs() {
             tab.onclick = () => switchSource(idx);
             tabsDiv.appendChild(tab);
         });
-        // Biztosítsuk, hogy a watchEnabled tömb mérete megegyezzen a források számával
-        if (watchEnabled.length !== sources.length) {
-            watchEnabled = new Array(sources.length).fill(false);
-        }
-        updateWatchToggleUI();
     } catch (err) {
         console.error('Error loading tabs:', err);
         const tabsDiv = document.getElementById('tabs');
@@ -63,7 +38,6 @@ function switchSource(idx) {
     loadTree();
     loadFiles();
     highlightActiveTab();
-    updateWatchToggleUI();
 }
 
 function highlightActiveTab() {
@@ -169,7 +143,7 @@ async function loadFiles() {
     } catch (err) {
         console.error('Error loading files:', err);
         const tbody = document.querySelector('#fileTable tbody');
-        if (tbody) tbody.innerHTML = '<tr><td colspan="4">Error loading files</td><tr>';
+        if (tbody) tbody.innerHTML = '<tr><td colspan="4">Error loading files</td></tr>';
     }
 }
 
@@ -216,62 +190,157 @@ async function fixSingleFile(filePath) {
     }
 }
 
-async function startBatchFix() {
-    try {
-        const url = `/api/browse?source=${currentSource}&path=${encodeURIComponent(currentPath)}&limit=${pageSize}&offset=${(currentPage-1)*pageSize}&missing_only=${missingOnly}`;
-        const res = await fetch(url);
-        if (!res.ok) throw new Error('Failed to fetch files');
-        const data = await res.json();
-        const files = data.files.map(f => f.path);
-        if (files.length === 0) {
-            alert('No files to process.');
-            return;
-        }
-        const overwrite = !missingOnly;
-        const batchRes = await fetch('/api/batch_fix', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({files: files, overwrite: overwrite})
-        });
-        const batchData = await batchRes.json();
-        if (batchData.task_id) {
-            currentTaskId = batchData.task_id;
-            const writeBtn = document.getElementById('autoFixBtn');
-            if (writeBtn) writeBtn.disabled = true;
-            if (pollingInterval) clearInterval(pollingInterval);
-            pollingInterval = setInterval(async () => {
-                try {
-                    const progRes = await fetch(`/api/task/${currentTaskId}/progress`);
-                    if (!progRes.ok) throw new Error('Progress error');
-                    const prog = await progRes.json();
-                    const percent = Math.round((prog.processed / prog.total) * 100);
-                    if (writeBtn) writeBtn.textContent = `${percent}%`;
-                    if (prog.status === 'completed') {
-                        clearInterval(pollingInterval);
-                        if (writeBtn) {
-                            writeBtn.disabled = false;
-                            writeBtn.textContent = 'Write';
-                        }
-                        currentTaskId = null;
-                        loadFiles();
-                        alert('Batch write completed.');
-                    }
-                } catch (err) {
+async function startBatchFix(files, overwrite, buttonElement) {
+    if (files.length === 0) {
+        alert('No files to process.');
+        return;
+    }
+    const batchRes = await fetch('/api/batch_fix', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({files: files, overwrite: overwrite})
+    });
+    const batchData = await batchRes.json();
+    if (batchData.task_id) {
+        currentTaskId = batchData.task_id;
+        if (buttonElement) buttonElement.disabled = true;
+        if (pollingInterval) clearInterval(pollingInterval);
+        pollingInterval = setInterval(async () => {
+            try {
+                const progRes = await fetch(`/api/task/${currentTaskId}/progress`);
+                if (!progRes.ok) throw new Error('Progress error');
+                const prog = await progRes.json();
+                const percent = Math.round((prog.processed / prog.total) * 100);
+                if (buttonElement) buttonElement.textContent = `${percent}%`;
+                if (prog.status === 'completed') {
                     clearInterval(pollingInterval);
-                    if (writeBtn) {
-                        writeBtn.disabled = false;
-                        writeBtn.textContent = 'Write';
+                    if (buttonElement) {
+                        buttonElement.disabled = false;
+                        buttonElement.textContent = buttonElement.id === 'fixPageBtn' ? 'Fix Page' : (buttonElement.id === 'fixFolderBtn' ? 'Fix Folder' : 'Fix All');
                     }
                     currentTaskId = null;
-                    console.error('Progress polling error', err);
+                    loadFiles();
+                    alert('Batch fix completed.');
                 }
-            }, 1000);
-        } else {
-            alert('Failed to start batch fix.');
-        }
-    } catch (err) {
-        alert('Error: ' + err.message);
+            } catch (err) {
+                clearInterval(pollingInterval);
+                if (buttonElement) {
+                    buttonElement.disabled = false;
+                    buttonElement.textContent = buttonElement.id === 'fixPageBtn' ? 'Fix Page' : (buttonElement.id === 'fixFolderBtn' ? 'Fix Folder' : 'Fix All');
+                }
+                currentTaskId = null;
+                console.error('Progress polling error', err);
+            }
+        }, 1000);
+    } else {
+        alert('Failed to start batch fix.');
     }
+}
+
+async function fixPage() {
+    const url = `/api/browse?source=${currentSource}&path=${encodeURIComponent(currentPath)}&limit=${pageSize}&offset=${(currentPage-1)*pageSize}&missing_only=${missingOnly}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    const files = data.files.map(f => f.path);
+    const overwrite = !missingOnly;
+    const btn = document.getElementById('fixPageBtn');
+    startBatchFix(files, overwrite, btn);
+}
+
+async function fixFolder() {
+    if (currentPath === '') {
+        alert('Please select a folder first.');
+        return;
+    }
+    const root = (await (await fetch('/api/sources')).json())[currentSource];
+    const fullPath = filepathJoin(root, currentPath);
+    const res = await fetch('/api/batch_fix_path', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({path: fullPath, overwrite: !missingOnly})
+    });
+    const data = await res.json();
+    if (data.task_id && data.task_id !== -1) {
+        currentTaskId = data.task_id;
+        const btn = document.getElementById('fixFolderBtn');
+        btn.disabled = true;
+        if (pollingInterval) clearInterval(pollingInterval);
+        pollingInterval = setInterval(async () => {
+            try {
+                const progRes = await fetch(`/api/task/${currentTaskId}/progress`);
+                if (!progRes.ok) throw new Error('Progress error');
+                const prog = await progRes.json();
+                const percent = Math.round((prog.processed / prog.total) * 100);
+                btn.textContent = `${percent}%`;
+                if (prog.status === 'completed') {
+                    clearInterval(pollingInterval);
+                    btn.disabled = false;
+                    btn.textContent = 'Fix Folder';
+                    currentTaskId = null;
+                    loadFiles();
+                    alert('Folder fix completed.');
+                }
+            } catch (err) {
+                clearInterval(pollingInterval);
+                btn.disabled = false;
+                btn.textContent = 'Fix Folder';
+                currentTaskId = null;
+                console.error('Progress polling error', err);
+            }
+        }, 1000);
+    } else if (data.message) {
+        alert(data.message);
+    } else {
+        alert('Failed to start folder fix.');
+    }
+}
+
+async function fixAll() {
+    const root = (await (await fetch('/api/sources')).json())[currentSource];
+    const res = await fetch('/api/batch_fix_path', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({path: root, overwrite: !missingOnly})
+    });
+    const data = await res.json();
+    if (data.task_id && data.task_id !== -1) {
+        currentTaskId = data.task_id;
+        const btn = document.getElementById('fixAllBtn');
+        btn.disabled = true;
+        if (pollingInterval) clearInterval(pollingInterval);
+        pollingInterval = setInterval(async () => {
+            try {
+                const progRes = await fetch(`/api/task/${currentTaskId}/progress`);
+                if (!progRes.ok) throw new Error('Progress error');
+                const prog = await progRes.json();
+                const percent = Math.round((prog.processed / prog.total) * 100);
+                btn.textContent = `${percent}%`;
+                if (prog.status === 'completed') {
+                    clearInterval(pollingInterval);
+                    btn.disabled = false;
+                    btn.textContent = 'Fix All';
+                    currentTaskId = null;
+                    loadFiles();
+                    alert('Full fix completed.');
+                }
+            } catch (err) {
+                clearInterval(pollingInterval);
+                btn.disabled = false;
+                btn.textContent = 'Fix All';
+                currentTaskId = null;
+                console.error('Progress polling error', err);
+            }
+        }, 1000);
+    } else if (data.message) {
+        alert(data.message);
+    } else {
+        alert('Failed to start full fix.');
+    }
+}
+
+function filepathJoin(root, sub) {
+    if (root.endsWith('/')) return root + sub;
+    return root + '/' + sub;
 }
 
 function renderPagination() {
@@ -328,83 +397,15 @@ function renderPagination() {
     addButton('>>', totalPages, false, currentPage === totalPages);
 }
 
-function updateWatchToggleUI() {
-    const toggle = document.getElementById('watchToggle');
-    if (toggle && watchEnabled.length > currentSource) {
-        toggle.checked = watchEnabled[currentSource] || false;
-    }
-}
-
-async function toggleWatchdog() {
-    const toggle = document.getElementById('watchToggle');
-    if (!toggle) return;
-    const newState = toggle.checked;
-    const endpoint = newState ? '/api/start_watchdog' : '/api/stop_watchdog';
-    try {
-        const res = await fetch(endpoint, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({source: currentSource})
-        });
-        const data = await res.json();
-        if (!data.success) throw new Error(data.error || 'Failed');
-        watchEnabled[currentSource] = newState;
-    } catch (err) {
-        alert('Failed to toggle watchdog: ' + err.message);
-        toggle.checked = !newState;
-    }
-}
-
-function connectSSE() {
-    if (sseConnection) {
-        sseConnection.close();
-    }
-    try {
-        sseConnection = new EventSource('/api/watchdog/events');
-        sseConnection.onmessage = (event) => {
-            try {
-                const data = JSON.parse(event.data);
-                if (data.source >= 0 && data.source < watchEnabled.length) {
-                    watchEnabled[data.source] = data.running;
-                    if (data.source === currentSource) {
-                        const toggle = document.getElementById('watchToggle');
-                        if (toggle && toggle.checked !== data.running) {
-                            toggle.checked = data.running;
-                        }
-                    }
-                }
-            } catch (e) {
-                console.error('SSE parse error', e);
-            }
-        };
-        sseConnection.onerror = (err) => {
-            console.error('SSE error, reconnecting in 5s', err);
-            if (sseConnection) sseConnection.close();
-            setTimeout(connectSSE, 5000);
-        };
-    } catch (err) {
-        console.error('SSE init error', err);
-        setTimeout(connectSSE, 5000);
-    }
-}
-
-window.addEventListener('beforeunload', () => {
-    if (sseConnection) sseConnection.close();
-});
-
 document.getElementById('missingOnly')?.addEventListener('change', (e) => {
     missingOnly = e.target.checked;
     currentPage = 1;
     loadFiles();
 });
-document.getElementById('autoFixBtn')?.addEventListener('click', startBatchFix);
-document.getElementById('watchToggle')?.addEventListener('change', toggleWatchdog);
+document.getElementById('fixPageBtn')?.addEventListener('click', fixPage);
+document.getElementById('fixFolderBtn')?.addEventListener('click', fixFolder);
+document.getElementById('fixAllBtn')?.addEventListener('click', fixAll);
 
-// --- Inicializálás: watchdog állapotok betöltése, majd tabok ---
-(async function init() {
-    await loadWatchdogStates();   // először betöltjük a watchdog állapotokat
-    await loadTabs();             // majd a tabokat (a watchEnabled már feltöltődött)
-    loadTree();
-    loadFiles();
-    connectSSE();
-})();
+loadTabs();
+loadTree();
+loadFiles();

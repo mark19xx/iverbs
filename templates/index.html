@@ -24,9 +24,7 @@
         <div class="tree-panel" id="treePanel">
             <div class="tree-header">
                 <span>📁 Folders</span>
-                <label class="watch-checkbox" style="margin-left: auto; display: flex; align-items: center; gap: 5px;">
-                    <input type="checkbox" id="watchToggle"> Watch
-                </label>
+                <!-- Watch checkbox teljesen eltűnt -->
             </div>
             <div id="tree"></div>
         </div>
@@ -37,7 +35,9 @@
             <div class="filter-container">
                 <div class="filter">
                     <label><input type="checkbox" id="missingOnly"> Missing only</label>
-                    <button id="autoFixBtn" class="btn">Write</button>
+                    <button id="fixPageBtn" class="btn">Fix Page</button>
+                    <button id="fixFolderBtn" class="btn">Fix Folder</button>
+                    <button id="fixAllBtn" class="btn">Fix All</button>
                 </div>
             </div>
             <div class="file-list">
