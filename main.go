@@ -798,6 +798,16 @@ func main() {
         json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
     })
 
+    http.HandleFunc("/api/watchdog_states", func(w http.ResponseWriter, r *http.Request) {
+        stateMutex.RLock()
+        defer stateMutex.RUnlock()
+        states := make([]bool, len(watchSources))
+        for i := 0; i < len(watchSources); i++ {
+            states[i] = watchdogStates[i]
+        }
+        json.NewEncoder(w).Encode(states)
+    })
+
     log.Printf("IVERBS %s starting on :5000", version)
     log.Fatal(http.ListenAndServe(":5000", nil))
 }
