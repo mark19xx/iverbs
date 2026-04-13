@@ -8,6 +8,7 @@ let missingOnly = false;
 let watchEnabled = [];
 let pollingInterval = null;
 let currentTaskId = null;
+let sseConnection = null;
 
 async function loadTabs() {
     const res = await fetch('/api/sources');
@@ -33,6 +34,7 @@ function switchSource(idx) {
     loadFiles();
     highlightActiveTab();
     updateWatchToggleUI();
+    updateWatchdogStatus();
 }
 
 function highlightActiveTab() {
@@ -101,7 +103,6 @@ async function loadFiles() {
         const row = tbody.insertRow();
         const nameCell = row.insertCell(0);
         const nameLink = document.createElement('a');
-        // Új végpont: /api/image/<source_idx>/<rel_path>
         nameLink.href = `/api/image/${currentSource}/${encodeURIComponent(f.rel_path)}`;
         nameLink.target = '_blank';
         nameLink.textContent = f.name;
@@ -267,8 +268,10 @@ async function updateWatchdogStatus() {
     const res = await fetch(`/api/watchdog_status?source=${currentSource}`);
     const data = await res.json();
     const toggle = document.getElementById('watchToggle');
-    toggle.checked = data.running;
-    watchEnabled[currentSource] = data.running;
+    if (toggle) {
+        toggle.checked = data.running;
+        watchEnabled[currentSource] = data.running;
+    }
 }
 
 async function toggleWatchdog() {
@@ -286,6 +289,7 @@ async function toggleWatchdog() {
         toggle.checked = !newState;
     } else {
         watchEnabled[currentSource] = newState;
+        // Az SSE majd frissíti a másik böngészőt
     }
 }
 
@@ -296,6 +300,49 @@ function updateWatchToggleUI() {
     }
 }
 
+// --- SSE kapcsolat a watchdog állapotok azonnali szinkronizálásához ---
+function connectSSE() {
+    if (sseConnection) {
+        sseConnection.close();
+    }
+    sseConnection = new EventSource('/api/watchdog/events');
+    
+    sseConnection.onmessage = (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            // Ha az aktuális source-hoz tartozik, frissítsd a toggle-t
+            if (data.source === currentSource) {
+                const toggle = document.getElementById('watchToggle');
+                if (toggle && toggle.checked !== data.running) {
+                    toggle.checked = data.running;
+                    watchEnabled[currentSource] = data.running;
+                }
+            } else {
+                // Más source állapota is eltárolható, ha később átváltunk
+                if (data.source >= 0 && data.source < watchEnabled.length) {
+                    watchEnabled[data.source] = data.running;
+                }
+            }
+        } catch (e) {
+            console.error('SSE message parse error', e);
+        }
+    };
+    
+    sseConnection.onerror = (err) => {
+        console.error('SSE connection error, reconnecting in 5s...', err);
+        sseConnection.close();
+        setTimeout(connectSSE, 5000);
+    };
+}
+
+// Kapcsolat lezárása oldal bezárásakor
+window.addEventListener('beforeunload', () => {
+    if (sseConnection) {
+        sseConnection.close();
+    }
+});
+
+// --- Eseménykezelők ---
 document.getElementById('missingOnly').addEventListener('change', (e) => {
     missingOnly = e.target.checked;
     currentPage = 1;
@@ -304,7 +351,9 @@ document.getElementById('missingOnly').addEventListener('change', (e) => {
 document.getElementById('autoFixBtn').addEventListener('click', startBatchFix);
 document.getElementById('watchToggle').addEventListener('change', toggleWatchdog);
 
+// --- Inicializálás ---
 loadTabs();
 loadTree();
 loadFiles();
 updateWatchdogStatus();
+connectSSE();

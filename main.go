@@ -38,6 +38,58 @@ var (
     stateMutex     sync.RWMutex
 )
 
+// SSE broker
+type SSEEvent struct {
+    Source  int  `json:"source"`
+    Running bool `json:"running"`
+}
+
+type SSEBroker struct {
+    clients        map[chan SSEEvent]bool
+    newClients     chan chan SSEEvent
+    closingClients chan chan SSEEvent
+    events         chan SSEEvent
+    mutex          sync.Mutex
+}
+
+func NewSSEBroker() *SSEBroker {
+    b := &SSEBroker{
+        clients:        make(map[chan SSEEvent]bool),
+        newClients:     make(chan chan SSEEvent),
+        closingClients: make(chan chan SSEEvent),
+        events:         make(chan SSEEvent),
+    }
+    go b.listen()
+    return b
+}
+
+func (b *SSEBroker) listen() {
+    for {
+        select {
+        case newCh := <-b.newClients:
+            b.mutex.Lock()
+            b.clients[newCh] = true
+            b.mutex.Unlock()
+        case closingCh := <-b.closingClients:
+            b.mutex.Lock()
+            delete(b.clients, closingCh)
+            b.mutex.Unlock()
+        case event := <-b.events:
+            b.mutex.Lock()
+            for ch := range b.clients {
+                ch <- event
+            }
+            b.mutex.Unlock()
+        }
+    }
+}
+
+func (b *SSEBroker) Broadcast(event SSEEvent) {
+    b.events <- event
+}
+
+var sseBroker = NewSSEBroker()
+
 type Task struct {
     Total     int    `json:"total"`
     Processed int    `json:"processed"`
@@ -382,6 +434,7 @@ func startWatchdogForSource(sourceIdx int) error {
     observers[sourceIdx] = watcher
     watchdogStates[sourceIdx] = true
     saveWatchdogState(sourceIdx)
+    sseBroker.Broadcast(SSEEvent{Source: sourceIdx, Running: true})
     return nil
 }
 
@@ -402,6 +455,7 @@ func stopWatchdogForSource(sourceIdx int) error {
     }
     watchdogStates[sourceIdx] = false
     saveWatchdogState(sourceIdx)
+    sseBroker.Broadcast(SSEEvent{Source: sourceIdx, Running: false})
     return nil
 }
 
@@ -664,6 +718,42 @@ func main() {
         json.NewEncoder(w).Encode(map[string]interface{}{"running": running})
     })
 
+    http.HandleFunc("/api/watchdog/events", func(w http.ResponseWriter, r *http.Request) {
+        w.Header().Set("Content-Type", "text/event-stream")
+        w.Header().Set("Cache-Control", "no-cache")
+        w.Header().Set("Connection", "keep-alive")
+        w.Header().Set("Access-Control-Allow-Origin", "*")
+
+        eventChan := make(chan SSEEvent)
+        sseBroker.newClients <- eventChan
+
+        // Küldjük el az aktuális állapotot minden forrásról a csatlakozáskor
+        stateMutex.RLock()
+        for idx, running := range watchdogStates {
+            eventChan <- SSEEvent{Source: idx, Running: running}
+        }
+        stateMutex.RUnlock()
+
+        flusher, ok := w.(http.Flusher)
+        if !ok {
+            http.Error(w, "SSE not supported", http.StatusInternalServerError)
+            return
+        }
+
+        ctx := r.Context()
+        for {
+            select {
+            case event := <-eventChan:
+                data, _ := json.Marshal(event)
+                fmt.Fprintf(w, "data: %s\n\n", data)
+                flusher.Flush()
+            case <-ctx.Done():
+                sseBroker.closingClients <- eventChan
+                return
+            }
+        }
+    })
+
     http.HandleFunc("/api/start_watchdog", func(w http.ResponseWriter, r *http.Request) {
         if r.Method != "POST" {
             http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -708,6 +798,6 @@ func main() {
         json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
     })
 
-    log.Println("IVERBS 0.3.0 starting on :5000")
+    log.Printf("IVERBS %s starting on :5000", version)
     log.Fatal(http.ListenAndServe(":5000", nil))
 }
