@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  iverbs:
+    build: .
+    container_name: iverbs
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./test-data:/watch/sources   # példa bind mount
+      - ./data:/data
+    environment:
+      - WATCH_DIRS=/watch/sources/dir1,/watch/sources/dir2
+      - WATCHDOG_DELAY_MS=300
+      - DB_PATH=/data/db/iverbs.db
+    restart: unless-stopped

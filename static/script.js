@@ -1,411 +1,392 @@
-let currentSource = 0;
-let currentPath = '';
-let currentPage = 1;
-let pageSize = 20;
-let totalFiles = 0;
-let missingOnly = false;
+(function() {
+    const API_BASE = '/api';
 
-let pollingInterval = null;
-let currentTaskId = null;
-
-async function loadTabs() {
+    // Template adatok kiolvasása meta tag-ekből
+    const versionMeta = document.querySelector('meta[name="iverbs-version"]');
+    const sourcesMeta = document.querySelector('meta[name="iverbs-sources"]');
+    
+    const VERSION = versionMeta ? versionMeta.content : '0.3.2';
+    let sources = [];
     try {
-        const res = await fetch('/api/sources');
-        if (!res.ok) throw new Error('Failed to load sources');
-        const sources = await res.json();
-        const tabsDiv = document.getElementById('tabs');
-        if (!tabsDiv) return;
-        tabsDiv.innerHTML = '';
-        sources.forEach((src, idx) => {
-            const tab = document.createElement('div');
-            tab.className = 'tab' + (idx === currentSource ? ' active' : '');
-            tab.textContent = src;
-            tab.onclick = () => switchSource(idx);
-            tabsDiv.appendChild(tab);
-        });
-    } catch (err) {
-        console.error('Error loading tabs:', err);
-        const tabsDiv = document.getElementById('tabs');
-        if (tabsDiv) tabsDiv.innerHTML = '<div style="color:red;">Error loading tabs</div>';
+        sources = JSON.parse(sourcesMeta.content);
+    } catch(e) {
+        console.error('Invalid sources JSON', e);
     }
-}
 
-function switchSource(idx) {
-    if (idx === currentSource) return;
-    currentSource = idx;
-    currentPath = '';
-    currentPage = 1;
-    loadTree();
-    loadFiles();
-    highlightActiveTab();
-}
+    // Opcionális: verzió kiírása a konzolra
+    console.log(`IVERBS ${VERSION} loaded`);
 
-function highlightActiveTab() {
-    const tabs = document.querySelectorAll('.tab');
-    tabs.forEach((tab, i) => {
-        if (i === currentSource) tab.classList.add('active');
-        else tab.classList.remove('active');
-    });
-}
+    let currentSource = 0;           // index
+    let currentPath = '';            // relatív útvonal a source gyökerétől
+    let currentPage = 1;
+    const limit = 20;
+    let missingOnly = false;
 
-async function loadTree() {
-    try {
-        const res = await fetch(`/api/tree/${currentSource}`);
-        if (!res.ok) throw new Error('Tree API error');
-        const dirs = await res.json();
-        const treeDiv = document.getElementById('tree');
-        if (!treeDiv) return;
-        treeDiv.innerHTML = '';
-        dirs.forEach(dir => {
-            const div = document.createElement('div');
-            div.className = 'tree-item';
-            if (currentPath === dir) div.classList.add('selected');
-            div.textContent = `📁 ${dir}`;
-            div.onclick = () => {
-                currentPath = dir;
-                currentPage = 1;
-                loadFiles();
-                highlightSelectedTreeItem();
-            };
-            treeDiv.appendChild(div);
-        });
-        const rootDiv = document.createElement('div');
-        rootDiv.className = 'tree-item';
-        if (currentPath === '') rootDiv.classList.add('selected');
-        rootDiv.textContent = '📁 ..';
-        rootDiv.onclick = () => {
-            currentPath = '';
+    // DOM elemek
+    const tabsEl = document.getElementById('tabs');
+    const folderTreeEl = document.getElementById('folder-tree');
+    const fileListBody = document.getElementById('file-list-body');
+    const paginationEl = document.getElementById('pagination');
+    const missingOnlyCheck = document.getElementById('missing-only');
+    const fixPageBtn = document.getElementById('fix-page-btn');
+    const fixFolderBtn = document.getElementById('fix-folder-btn');
+    const fixAllBtn = document.getElementById('fix-all-btn');
+
+    // Állapot
+    let activeFolder = ''; // a kiválasztott mappa (relatív út) a sidebar-on
+
+    // Inicializálás
+    function init() {
+        renderTabs();
+        if (sources.length > 0) {
+            selectSource(0);
+        }
+        missingOnlyCheck.addEventListener('change', () => {
+            missingOnly = missingOnlyCheck.checked;
             currentPage = 1;
             loadFiles();
-            highlightSelectedTreeItem();
-        };
-        treeDiv.prepend(rootDiv);
-        highlightSelectedTreeItem();
-    } catch (err) {
-        console.error('Error loading tree:', err);
-        const treeDiv = document.getElementById('tree');
-        if (treeDiv) treeDiv.innerHTML = '<div style="color:red;">Error loading folders</div>';
+        });
+        fixPageBtn.addEventListener('click', onFixPage);
+        fixFolderBtn.addEventListener('click', onFixFolder);
+        fixAllBtn.addEventListener('click', onFixAll);
     }
-}
 
-function highlightSelectedTreeItem() {
-    const items = document.querySelectorAll('.tree-item');
-    items.forEach(item => {
-        if (item.textContent.includes(currentPath) && currentPath !== '') {
-            if (item.textContent === `📁 ${currentPath}`) item.classList.add('selected');
-            else item.classList.remove('selected');
-        } else if (currentPath === '' && item.textContent === '📁 ..') {
-            item.classList.add('selected');
-        } else {
-            item.classList.remove('selected');
+    function renderTabs() {
+        tabsEl.innerHTML = '';
+        sources.forEach((name, idx) => {
+            const tab = document.createElement('div');
+            tab.className = 'tab' + (idx === currentSource ? ' active' : '');
+            tab.textContent = name;
+            tab.dataset.index = idx;
+            tab.addEventListener('click', () => selectSource(idx));
+            tabsEl.appendChild(tab);
+        });
+    }
+
+    function selectSource(idx) {
+        currentSource = idx;
+        currentPath = '';
+        activeFolder = '';
+        currentPage = 1;
+        renderTabs();
+        loadFolderTree();
+        loadFiles();
+    }
+
+    async function loadFolderTree() {
+        try {
+            const resp = await fetch(`${API_BASE}/tree/${currentSource}`);
+            const dirs = await resp.json();
+            renderFolderTree(dirs);
+        } catch (err) {
+            console.error('Failed to load folder tree', err);
         }
-    });
-}
+    }
 
-async function loadFiles() {
-    try {
-        const url = `/api/browse?source=${currentSource}&path=${encodeURIComponent(currentPath)}&limit=${pageSize}&offset=${(currentPage-1)*pageSize}&missing_only=${missingOnly}`;
-        const res = await fetch(url);
-        if (!res.ok) throw new Error('Browse API error');
-        const data = await res.json();
-        totalFiles = data.total;
-        const files = data.files;
-        const tbody = document.querySelector('#fileTable tbody');
-        if (!tbody) return;
-        tbody.innerHTML = '';
-        files.forEach(f => {
-            const row = tbody.insertRow();
-            const nameCell = row.insertCell(0);
-            const nameLink = document.createElement('a');
-            nameLink.href = `/api/image/${currentSource}/${encodeURIComponent(f.rel_path)}`;
-            nameLink.target = '_blank';
-            nameLink.textContent = f.name;
-            nameLink.style.color = '#20c997';
-            nameLink.style.textDecoration = 'none';
-            nameCell.appendChild(nameLink);
-            row.insertCell(1).textContent = f.estimated || '?';
-            const exifStatus = f.has_exif ? '✓' : '✗';
-            row.insertCell(2).textContent = exifStatus;
-            const actionCell = row.insertCell(3);
+    function renderFolderTree(dirs) {
+        folderTreeEl.innerHTML = '';
+        // Gyökér elem (opcionális)
+        const rootLi = document.createElement('li');
+        rootLi.textContent = '. (root)';
+        rootLi.dataset.path = '';
+        rootLi.addEventListener('click', () => selectFolder(''));
+        if (activeFolder === '') rootLi.classList.add('active');
+        folderTreeEl.appendChild(rootLi);
+
+        dirs.forEach(dir => {
+            const li = document.createElement('li');
+            li.textContent = dir;
+            li.dataset.path = dir;
+            li.addEventListener('click', () => selectFolder(dir));
+            if (activeFolder === dir) li.classList.add('active');
+            folderTreeEl.appendChild(li);
+        });
+    }
+
+    function selectFolder(path) {
+        activeFolder = path;
+        currentPath = path;
+        currentPage = 1;
+        // Frissítjük az aktív stílust
+        document.querySelectorAll('#folder-tree li').forEach(li => {
+            li.classList.remove('active');
+            if (li.dataset.path === path) li.classList.add('active');
+        });
+        loadFiles();
+    }
+
+    async function loadFiles() {
+        const offset = (currentPage - 1) * limit;
+        const url = `${API_BASE}/browse?source=${currentSource}&path=${encodeURIComponent(currentPath)}&limit=${limit}&offset=${offset}&missing_only=${missingOnly}`;
+        try {
+            const resp = await fetch(url);
+            const data = await resp.json();
+            renderFileTable(data.files);
+            renderPagination(data.total);
+        } catch (err) {
+            console.error('Failed to load files', err);
+        }
+    }
+
+    function renderFileTable(files) {
+        fileListBody.innerHTML = '';
+        if (files.length === 0) {
+            fileListBody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:2rem;">No files found</td></tr>';
+            return;
+        }
+        files.forEach(file => {
+            const tr = document.createElement('tr');
+            tr.dataset.absPath = file.abs_path || ''; // abs_path a backend-ből jön
+
+            // Név link
+            const nameTd = document.createElement('td');
+            const link = document.createElement('a');
+            link.href = `${API_BASE}/image/${currentSource}/${encodeURI(file.path)}`;
+            link.target = '_blank';
+            link.textContent = file.name;
+            nameTd.appendChild(link);
+            tr.appendChild(nameTd);
+
+            // Becsült dátum
+            const estTd = document.createElement('td');
+            estTd.textContent = file.est_date || '-';
+            tr.appendChild(estTd);
+
+            // EXIF?
+            const exifTd = document.createElement('td');
+            exifTd.textContent = file.has_exif ? '✓' : '✗';
+            exifTd.className = file.has_exif ? 'exif-yes' : 'exif-no';
+            tr.appendChild(exifTd);
+
+            // Műveletek
+            const actionsTd = document.createElement('td');
             const fixBtn = document.createElement('button');
             fixBtn.textContent = 'Fix';
-            fixBtn.className = 'btn-small';
-            fixBtn.onclick = () => fixSingleFile(f.path);
-            actionCell.appendChild(fixBtn);
+            fixBtn.className = 'btn';
+            fixBtn.style.marginRight = '5px';
+            fixBtn.addEventListener('click', () => fixSingle(file, false));
             const editBtn = document.createElement('button');
             editBtn.textContent = 'Edit';
-            editBtn.className = 'btn-small';
-            editBtn.style.marginLeft = '5px';
-            editBtn.onclick = () => editFileDate(f.path);
-            actionCell.appendChild(editBtn);
-        });
-        renderPagination();
-    } catch (err) {
-        console.error('Error loading files:', err);
-        const tbody = document.querySelector('#fileTable tbody');
-        if (tbody) tbody.innerHTML = '<tr><td colspan="4">Error loading files</td></tr>';
-    }
-}
+            editBtn.className = 'btn';
+            editBtn.addEventListener('click', () => editSingle(file));
+            actionsTd.appendChild(fixBtn);
+            actionsTd.appendChild(editBtn);
+            tr.appendChild(actionsTd);
 
-async function editFileDate(filePath) {
-    try {
-        const exifRes = await fetch(`/api/exif?file=${encodeURIComponent(filePath)}`);
-        const exifData = await exifRes.json();
-        const currentExif = exifData.exif_date ? exifData.exif_date.split(' ')[0] : '';
-        const newDate = prompt(`Enter date (YYYY-MM-DD) for ${filePath.split('/').pop()}`, currentExif);
-        if (!newDate) return;
-        const res = await fetch('/api/fix', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({file: filePath, date: newDate})
+            fileListBody.appendChild(tr);
         });
-        const data = await res.json();
-        if (data.success) {
-            alert('Date updated!');
-            loadFiles();
-        } else {
-            alert('Error: ' + (data.error || 'Unknown'));
+    }
+
+    function renderPagination(total) {
+        const totalPages = Math.ceil(total / limit);
+        paginationEl.innerHTML = '';
+
+        if (totalPages <= 1) return;
+
+        const createPageBtn = (page, text = page, disabled = false) => {
+            const btn = document.createElement('button');
+            btn.textContent = text;
+            if (page === currentPage) btn.classList.add('active');
+            btn.disabled = disabled;
+            if (!disabled) {
+                btn.addEventListener('click', () => {
+                    currentPage = page;
+                    loadFiles();
+                });
+            }
+            return btn;
+        };
+
+        // << (első)
+        paginationEl.appendChild(createPageBtn(1, '<<', currentPage === 1));
+        // < (előző)
+        paginationEl.appendChild(createPageBtn(currentPage - 1, '<', currentPage === 1));
+
+        // Oldalszámok (intelligens)
+        let startPage = Math.max(1, currentPage - 2);
+        let endPage = Math.min(totalPages, currentPage + 2);
+        if (endPage - startPage < 4) {
+            if (startPage === 1) endPage = Math.min(totalPages, startPage + 4);
+            else if (endPage === totalPages) startPage = Math.max(1, endPage - 4);
         }
-    } catch (err) {
-        alert('Error: ' + err.message);
-    }
-}
-
-async function fixSingleFile(filePath) {
-    try {
-        const res = await fetch('/api/fix', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({file: filePath, overwrite: false})
-        });
-        const data = await res.json();
-        if (data.success) {
-            alert('Fixed!');
-            loadFiles();
-        } else {
-            alert('Error: ' + (data.error || 'Unknown'));
+        if (startPage > 1) {
+            paginationEl.appendChild(createPageBtn(1));
+            if (startPage > 2) {
+                const ellipsis = document.createElement('span');
+                ellipsis.textContent = '...';
+                ellipsis.style.padding = '0 0.5rem';
+                paginationEl.appendChild(ellipsis);
+            }
         }
-    } catch (err) {
-        alert('Error: ' + err.message);
-    }
-}
-
-async function startBatchFix(files, overwrite, buttonElement) {
-    if (files.length === 0) {
-        alert('No files to process.');
-        return;
-    }
-    const batchRes = await fetch('/api/batch_fix', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({files: files, overwrite: overwrite})
-    });
-    const batchData = await batchRes.json();
-    if (batchData.task_id) {
-        currentTaskId = batchData.task_id;
-        if (buttonElement) buttonElement.disabled = true;
-        if (pollingInterval) clearInterval(pollingInterval);
-        pollingInterval = setInterval(async () => {
-            try {
-                const progRes = await fetch(`/api/task/${currentTaskId}/progress`);
-                if (!progRes.ok) throw new Error('Progress error');
-                const prog = await progRes.json();
-                const percent = Math.round((prog.processed / prog.total) * 100);
-                if (buttonElement) buttonElement.textContent = `${percent}%`;
-                if (prog.status === 'completed') {
-                    clearInterval(pollingInterval);
-                    if (buttonElement) {
-                        buttonElement.disabled = false;
-                        buttonElement.textContent = buttonElement.id === 'fixPageBtn' ? 'Fix Page' : (buttonElement.id === 'fixFolderBtn' ? 'Fix Folder' : 'Fix All');
-                    }
-                    currentTaskId = null;
-                    loadFiles();
-                    alert('Batch fix completed.');
-                }
-            } catch (err) {
-                clearInterval(pollingInterval);
-                if (buttonElement) {
-                    buttonElement.disabled = false;
-                    buttonElement.textContent = buttonElement.id === 'fixPageBtn' ? 'Fix Page' : (buttonElement.id === 'fixFolderBtn' ? 'Fix Folder' : 'Fix All');
-                }
-                currentTaskId = null;
-                console.error('Progress polling error', err);
+        for (let p = startPage; p <= endPage; p++) {
+            paginationEl.appendChild(createPageBtn(p));
+        }
+        if (endPage < totalPages) {
+            if (endPage < totalPages - 1) {
+                const ellipsis = document.createElement('span');
+                ellipsis.textContent = '...';
+                ellipsis.style.padding = '0 0.5rem';
+                paginationEl.appendChild(ellipsis);
             }
-        }, 1000);
-    } else {
-        alert('Failed to start batch fix.');
+            paginationEl.appendChild(createPageBtn(totalPages));
+        }
+
+        // > (következő)
+        paginationEl.appendChild(createPageBtn(currentPage + 1, '>', currentPage === totalPages));
+        // >> (utolsó)
+        paginationEl.appendChild(createPageBtn(totalPages, '>>', currentPage === totalPages));
     }
-}
 
-async function fixPage() {
-    const url = `/api/browse?source=${currentSource}&path=${encodeURIComponent(currentPath)}&limit=${pageSize}&offset=${(currentPage-1)*pageSize}&missing_only=${missingOnly}`;
-    const res = await fetch(url);
-    const data = await res.json();
-    const files = data.files.map(f => f.path);
-    const overwrite = !missingOnly;
-    const btn = document.getElementById('fixPageBtn');
-    startBatchFix(files, overwrite, btn);
-}
-
-async function fixFolder() {
-    if (currentPath === '') {
-        alert('Please select a folder first.');
-        return;
-    }
-    const root = (await (await fetch('/api/sources')).json())[currentSource];
-    const fullPath = filepathJoin(root, currentPath);
-    const res = await fetch('/api/batch_fix_path', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({path: fullPath, overwrite: !missingOnly})
-    });
-    const data = await res.json();
-    if (data.task_id && data.task_id !== -1) {
-        currentTaskId = data.task_id;
-        const btn = document.getElementById('fixFolderBtn');
-        btn.disabled = true;
-        if (pollingInterval) clearInterval(pollingInterval);
-        pollingInterval = setInterval(async () => {
-            try {
-                const progRes = await fetch(`/api/task/${currentTaskId}/progress`);
-                if (!progRes.ok) throw new Error('Progress error');
-                const prog = await progRes.json();
-                const percent = Math.round((prog.processed / prog.total) * 100);
-                btn.textContent = `${percent}%`;
-                if (prog.status === 'completed') {
-                    clearInterval(pollingInterval);
-                    btn.disabled = false;
-                    btn.textContent = 'Fix Folder';
-                    currentTaskId = null;
-                    loadFiles();
-                    alert('Folder fix completed.');
-                }
-            } catch (err) {
-                clearInterval(pollingInterval);
-                btn.disabled = false;
-                btn.textContent = 'Fix Folder';
-                currentTaskId = null;
-                console.error('Progress polling error', err);
-            }
-        }, 1000);
-    } else if (data.message) {
-        alert(data.message);
-    } else {
-        alert('Failed to start folder fix.');
-    }
-}
-
-async function fixAll() {
-    const root = (await (await fetch('/api/sources')).json())[currentSource];
-    const res = await fetch('/api/batch_fix_path', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({path: root, overwrite: !missingOnly})
-    });
-    const data = await res.json();
-    if (data.task_id && data.task_id !== -1) {
-        currentTaskId = data.task_id;
-        const btn = document.getElementById('fixAllBtn');
-        btn.disabled = true;
-        if (pollingInterval) clearInterval(pollingInterval);
-        pollingInterval = setInterval(async () => {
-            try {
-                const progRes = await fetch(`/api/task/${currentTaskId}/progress`);
-                if (!progRes.ok) throw new Error('Progress error');
-                const prog = await progRes.json();
-                const percent = Math.round((prog.processed / prog.total) * 100);
-                btn.textContent = `${percent}%`;
-                if (prog.status === 'completed') {
-                    clearInterval(pollingInterval);
-                    btn.disabled = false;
-                    btn.textContent = 'Fix All';
-                    currentTaskId = null;
-                    loadFiles();
-                    alert('Full fix completed.');
-                }
-            } catch (err) {
-                clearInterval(pollingInterval);
-                btn.disabled = false;
-                btn.textContent = 'Fix All';
-                currentTaskId = null;
-                console.error('Progress polling error', err);
-            }
-        }, 1000);
-    } else if (data.message) {
-        alert(data.message);
-    } else {
-        alert('Failed to start full fix.');
-    }
-}
-
-function filepathJoin(root, sub) {
-    if (root.endsWith('/')) return root + sub;
-    return root + '/' + sub;
-}
-
-function renderPagination() {
-    const totalPages = Math.ceil(totalFiles / pageSize);
-    const paginationDiv = document.getElementById('pagination');
-    if (!paginationDiv) return;
-    paginationDiv.innerHTML = '';
-
-    if (totalPages === 0) return;
-
-    function addButton(label, page, isActive = false, disabled = false) {
-        const btn = document.createElement('button');
-        btn.textContent = label;
-        if (disabled) btn.disabled = true;
-        if (isActive) btn.classList.add('active');
-        btn.onclick = () => {
-            if (page !== currentPage) {
-                currentPage = page;
+    async function fixSingle(file, overwrite = false) {
+        try {
+            const resp = await fetch(`${API_BASE}/fix`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({file: file.AbsPath || file.abs_path, overwrite: overwrite})
+            });
+            if (!resp.ok) {
+                const err = await resp.text();
+                alert('Fix failed: ' + err);
+            } else {
                 loadFiles();
             }
+        } catch (err) {
+            alert('Error: ' + err);
+        }
+    }
+
+    async function editSingle(file) {
+        let currentDate = '';
+        try {
+            const resp = await fetch(`${API_BASE}/exif?file=${encodeURIComponent(file.AbsPath || file.abs_path)}`);
+            const data = await resp.json();
+            if (data.exif_date) {
+                const parts = data.exif_date.split(' ')[0].split(':');
+                if (parts.length === 3) {
+                    currentDate = parts.join('-');
+                }
+            }
+        } catch (e) {}
+
+        const newDate = prompt('Enter date (YYYY-MM-DD):', currentDate);
+        if (!newDate) return;
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(newDate)) {
+            alert('Invalid date format. Use YYYY-MM-DD.');
+            return;
+        }
+        try {
+            const resp = await fetch(`${API_BASE}/fix`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({file: file.AbsPath || file.abs_path, date: newDate})
+            });
+            if (!resp.ok) {
+                const err = await resp.text();
+                alert('Edit failed: ' + err);
+            } else {
+                loadFiles();
+            }
+        } catch (err) {
+            alert('Error: ' + err);
+        }
+    }
+
+    async function runBatchWithProgress(endpoint, body, button) {
+        const originalText = button.textContent;
+        button.disabled = true;
+        try {
+            const resp = await fetch(endpoint, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(body)
+            });
+            if (!resp.ok) throw new Error(await resp.text());
+            const data = await resp.json();
+            const taskId = data.task_id;
+
+            const poll = async () => {
+                const progResp = await fetch(`${API_BASE}/task/${taskId}/progress`);
+                const prog = await progResp.json();
+                const percent = prog.total > 0 ? Math.round((prog.processed / prog.total) * 100) : 0;
+                button.textContent = `${originalText} (${percent}%)`;
+                if (prog.status === 'completed') {
+                    button.textContent = originalText;
+                    button.disabled = false;
+                    loadFiles();
+                } else {
+                    setTimeout(poll, 1000);
+                }
+            };
+            poll();
+        } catch (err) {
+            alert('Batch operation failed: ' + err);
+            button.textContent = originalText;
+            button.disabled = false;
+        }
+    }
+
+    async function onFixPage() {
+        const files = [];
+        document.querySelectorAll('#file-list-body tr').forEach(row => {
+            const absPath = row.dataset.absPath;
+            if (absPath) files.push(absPath);
+        });
+        if (files.length === 0) {
+            alert('No files on current page.');
+            return;
+        }
+        runBatchWithProgress(`${API_BASE}/batch_fix`, {files: files, overwrite: !missingOnly}, fixPageBtn);
+    }
+
+    async function onFixFolder() {
+        if (!activeFolder && activeFolder !== '') {
+            alert('Please select a folder.');
+            return;
+        }
+        // A batch_fix_path végpontot hívjuk, átadva a source indexet query paraméterben és a relatív utat a body-ban
+        const resp = await fetch(`${API_BASE}/batch_fix_path?source=${currentSource}`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({path: currentPath, overwrite: !missingOnly})
+        });
+        if (!resp.ok) throw new Error(await resp.text());
+        const data = await resp.json();
+        pollTaskProgress(data.task_id, fixFolderBtn, 'Fix Folder');
+    }
+
+    async function onFixAll() {
+        const resp = await fetch(`${API_BASE}/batch_fix_path?source=${currentSource}`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({path: '', overwrite: !missingOnly})
+        });
+        if (!resp.ok) throw new Error(await resp.text());
+        const data = await resp.json();
+        pollTaskProgress(data.task_id, fixAllBtn, 'Fix All');
+    }
+
+    function pollTaskProgress(taskId, button, originalText) {
+        button.disabled = true;
+        const poll = async () => {
+            try {
+                const resp = await fetch(`${API_BASE}/task/${taskId}/progress`);
+                const prog = await resp.json();
+                const percent = prog.total > 0 ? Math.round((prog.processed / prog.total) * 100) : 0;
+                button.textContent = `${originalText} (${percent}%)`;
+                if (prog.status === 'completed') {
+                    button.textContent = originalText;
+                    button.disabled = false;
+                    loadFiles();
+                } else {
+                    setTimeout(poll, 1000);
+                }
+            } catch (err) {
+                button.textContent = originalText;
+                button.disabled = false;
+            }
         };
-        paginationDiv.appendChild(btn);
+        poll();
     }
 
-    addButton('<<', 1, false, currentPage === 1);
-    addButton('<', currentPage - 1, false, currentPage === 1);
-
-    let pages = [];
-    if (totalPages <= 5) {
-        for (let i = 1; i <= totalPages; i++) pages.push(i);
-    } else {
-        pages.push(1);
-        if (currentPage > 3) pages.push('...');
-        for (let i = Math.max(2, currentPage - 1); i <= Math.min(totalPages - 1, currentPage + 1); i++) {
-            if (!pages.includes(i)) pages.push(i);
-        }
-        if (currentPage < totalPages - 2) pages.push('...');
-        pages.push(totalPages);
-    }
-
-    for (let p of pages) {
-        if (p === '...') {
-            const span = document.createElement('span');
-            span.textContent = '...';
-            span.style.margin = '0 4px';
-            span.style.color = '#888';
-            paginationDiv.appendChild(span);
-        } else {
-            addButton(p.toString(), p, p === currentPage, false);
-        }
-    }
-
-    addButton('>', currentPage + 1, false, currentPage === totalPages);
-    addButton('>>', totalPages, false, currentPage === totalPages);
-}
-
-document.getElementById('missingOnly')?.addEventListener('change', (e) => {
-    missingOnly = e.target.checked;
-    currentPage = 1;
-    loadFiles();
-});
-document.getElementById('fixPageBtn')?.addEventListener('click', fixPage);
-document.getElementById('fixFolderBtn')?.addEventListener('click', fixFolder);
-document.getElementById('fixAllBtn')?.addEventListener('click', fixAll);
-
-loadTabs();
-loadTree();
-loadFiles();
+    init();
+})();
