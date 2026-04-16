@@ -1,7 +1,8 @@
 # Build stage
 FROM golang:1.21-alpine AS builder
 
-RUN apk add --no-cache git
+# Telepítjük a szükséges build eszközöket (gcc, musl-dev) a CGO-hoz
+RUN apk add --no-cache git gcc musl-dev
 
 WORKDIR /app
 COPY go.mod go.sum ./
