@@ -2,65 +2,51 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>IVERBS</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>IVERBS {{ .version }}</title>
     <link rel="stylesheet" href="/static/style.css">
-    <!-- Template adatok meta tag-ekben -->
-    <meta name="iverbs-version" content="{{.Version}}">
-    <meta name="iverbs-sources" content="{{.Sources}}">
 </head>
 <body>
-    <nav class="navbar">
-        <div class="nav-brand">
-            <span class="brand">IVERBS</span>
-            <span class="version">{{.Version}}</span>
+<div class="container">
+    <nav>
+        <div>
+            <h1 style="display: inline-block; margin-right: 8px;">IVERBS</h1>
+            <span class="version">{{ .version }}</span>
         </div>
+        <div class="nav-buttons"></div>
     </nav>
 
-    <div class="app-container">
-        <div class="tabs-container" id="tabs">
-            <!-- Dinamikusan töltve -->
+    <div class="tabs" id="tabs"></div>
+
+    <div class="main-panel">
+        <div class="tree-panel" id="treePanel">
+            <div class="tree-header">📁 Folders</div>
+            <div id="tree"></div>
         </div>
-
-        <div class="main-panel">
-            <div class="sidebar" id="sidebar">
-                <h3>Folders</h3>
-                <ul id="folder-tree" class="folder-tree"></ul>
+        <div class="content-panel">
+            <div class="pagination-container">
+                <div class="pagination" id="pagination"></div>
             </div>
-
-            <div class="content">
-                <div class="toolbar">
-                    <label class="checkbox-label">
-                        <input type="checkbox" id="missing-only"> Missing only
-                    </label>
-                    <div class="batch-actions">
-                        <button id="fix-page-btn" class="btn btn-primary">Fix Page</button>
-                        <button id="fix-folder-btn" class="btn btn-primary">Fix Folder</button>
-                        <button id="fix-all-btn" class="btn btn-primary">Fix All</button>
-                    </div>
+            <div class="filter-container">
+                <div class="filter">
+                    <label><input type="checkbox" id="missingOnly"> Missing only</label>
+                    <button id="fixPageBtn" class="btn">Fix Page</button>
+                    <button id="fixFolderBtn" class="btn">Fix Folder</button>
+                    <button id="fixAllBtn" class="btn">Fix All</button>
                 </div>
-
-                <div class="file-table-wrapper">
-                    <table class="file-table" id="file-table">
-                        <thead>
-                            <tr>
-                                <th>Name</th>
-                                <th>Estimated Date</th>
-                                <th>EXIF?</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="file-list-body"></tbody>
-                    </table>
-                </div>
-
-                <div class="pagination-container">
-                    <div class="pagination" id="pagination"></div>
-                </div>
+            </div>
+            <div class="file-list">
+                <table id="fileTable" style="width: 100%;">
+                    <thead>
+                        <tr><th>Name</th><th>Estimated date</th><th>EXIF?</th><th>Action</th></tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
             </div>
         </div>
     </div>
+</div>
 
-    <script src="/static/script.js"></script>
+<script src="/static/script.js"></script>
 </body>
 </html>

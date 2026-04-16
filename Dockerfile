@@ -1,35 +1,18 @@
-# Build stage
 FROM golang:1.21-alpine AS builder
-
-# Telepítjük a szükséges build eszközöket (gcc, musl-dev) a CGO-hoz
-RUN apk add --no-cache git gcc musl-dev
-
+RUN apk add --no-cache gcc musl-dev sqlite-dev
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
-
 COPY . .
-RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -ldflags="-s -w" -o iverbs .
+RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -ldflags '-extldflags "-static"' -o iverbs .
 
-# Final stage
 FROM alpine:3.19
-
-RUN apk add --no-cache exiftool inotify-tools ca-certificates tzdata
-
+RUN apk add --no-cache exiftool inotify-tools
 WORKDIR /app
-
 COPY --from=builder /app/iverbs .
-COPY static/ static/
-COPY templates/ templates/
-
-# Create directories for mounts
-RUN mkdir -p /watch/sources /data/db
-
-ENV PORT=8080
-ENV WATCH_DIRS="/watch/sources"
-ENV WATCHDOG_DELAY_MS=300
-ENV DB_PATH="/data/db/iverbs.db"
-
-EXPOSE 8080
-
+COPY templates/ ./templates/
+COPY static/ ./static/
+RUN mkdir -p /data/cache /data/logs /data/db
+VOLUME ["/data"]
+EXPOSE 5000
 CMD ["./iverbs"]

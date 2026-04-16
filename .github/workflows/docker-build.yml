@@ -1,45 +1,38 @@
-name: Docker Build and Push
+name: Docker Build to GHCR
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Image version tag'
+        description: 'Version tag (e.g., 0.3.2)'
         required: true
-        default: '0.3.3'
-
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+        default: '0.3.2'
+        type: string
 
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
       packages: write
+      contents: read
 
     steps:
-      - name: Checkout
+      - name: Checkout kód
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GitHub Container Registry
+      - name: Bejelentkezés a GHCR-be
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
+      - name: Docker képfájl megépítése és feltöltése
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.inputs.version }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+            ghcr.io/${{ github.repository_owner }}/iverbs:latest
+            ghcr.io/${{ github.repository_owner }}/iverbs:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/iverbs:${{ inputs.version }}

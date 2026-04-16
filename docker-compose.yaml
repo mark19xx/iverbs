@@ -1,0 +1,15 @@
+services:
+  iverbs:
+    image: ghcr.io/mark19xx/iverbs:0.3.2   # vagy helyi build
+    container_name: iverbs
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    volumes:
+      - /home/lenovo/photos/Gyerekek:/watch/sources/photos:rw
+      - /home/lenovo/videos/Gyerekek:/watch/sources/videos:rw
+      - /home/lenovo/photos/teszt:/watch/sources/teszt:rw
+      - /opt/docker/iverbs/data:/data:rw
+    environment:
+      - WATCH_DIRS=/watch/sources/photos,/watch/sources/videos,/watch/sources/teszt
+      - WATCHDOG_DELAY_MS=300
