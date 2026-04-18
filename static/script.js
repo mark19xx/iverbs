@@ -72,7 +72,26 @@ async function loadTree() {
 
         treeDiv.innerHTML = '';
 
-        // Alkonyvtarak
+        // Először hozzáadjuk a ".." gombot, ha nem a gyökérben vagyunk
+        if (currentPath !== '') {
+            const parentDiv = document.createElement('div');
+            parentDiv.className = 'tree-item';
+            parentDiv.textContent = '📁 ..';
+            parentDiv.onclick = () => {
+                const parts = currentPath.split('/');
+                parts.pop();
+                currentPath = parts.join('');
+                if (currentPath === '') {
+                    currentPath = '';
+                }
+                currentPage = 1;
+                loadTree();
+                loadFiles();
+            };
+            treeDiv.appendChild(parentDiv);
+        }
+
+        // Majd az alkönyvtárak
         if (dirs.length > 0) {
             dirs.forEach(dir => {
                 const div = document.createElement('div');
@@ -88,22 +107,8 @@ async function loadTree() {
             });
         }
 
-        // ".." gomb – mindig a gyökér kivételével
-        if (currentPath !== '') {
-            const parentDiv = document.createElement('div');
-            parentDiv.className = 'tree-item';
-            parentDiv.textContent = '📁 ..';
-            parentDiv.onclick = () => {
-                // Visszalépés a szülő könyvtárba
-                const parts = currentPath.split('/');
-                parts.pop(); // utolsó rész eltávolítása
-                currentPath = parts.join('/');
-                currentPage = 1;
-                loadTree();  // újratöltjük a fát a szülő mappához
-                loadFiles(); // és a fájlokat
-            };
-            treeDiv.prepend(parentDiv);
-        }
+        // Ha nincs alkönyvtár és nem a gyökérben vagyunk, akkor is van ".." (már hozzáadtuk)
+        // Ha a gyökérben vagyunk és nincs alkönyvtár, akkor semmi sem jelenik meg (üres)
     } catch (err) {
         console.error('Error loading tree:', err);
         const treeDiv = document.getElementById('tree');
