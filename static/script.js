@@ -50,7 +50,6 @@ function highlightActiveTab() {
 
 async function loadTree() {
     try {
-        // A lekérdezéshez adjuk hozzá a currentPath paramétert
         let url = `/api/tree/${currentSource}`;
         if (currentPath) {
             url += `?path=${encodeURIComponent(currentPath)}`;
@@ -62,53 +61,48 @@ async function loadTree() {
         const treeHeader = document.getElementById('treeHeader');
         if (!treeDiv) return;
 
-        // Fejléc beállítása: aktuális mappa neve
+        // Fejléc beállítása
         if (currentPath === '') {
-            // Gyökér: a tab neve (a forrás mappa neve)
             const sources = await (await fetch('/api/sources')).json();
             treeHeader.textContent = `📁 ${sources[currentSource]}`;
         } else {
-            // Almappa: a mappa neve
-            treeHeader.textContent = `📁 ${currentPath}`;
+            const parts = currentPath.split('/');
+            treeHeader.textContent = `📁 ${parts[parts.length-1]}`;
         }
 
         treeDiv.innerHTML = '';
-        // Ha vannak alkönyvtárak, listázzuk őket
+
+        // Alkonyvtarak
         if (dirs.length > 0) {
             dirs.forEach(dir => {
                 const div = document.createElement('div');
                 div.className = 'tree-item';
-                if (currentPath === dir) div.classList.add('selected');
                 div.textContent = `📁 ${dir}`;
                 div.onclick = () => {
-                    currentPath = dir;
+                    currentPath = currentPath ? `${currentPath}/${dir}` : dir;
                     currentPage = 1;
-                    loadTree();   // újra betöltjük a fát az új mappához
-                    loadFiles();  // és a fájlokat
-                    highlightSelectedTreeItem();
+                    loadTree();
+                    loadFiles();
                 };
                 treeDiv.appendChild(div);
             });
         }
-        // ".." gomb – mindig jelen van, kivéve ha a gyökérben vagyunk? A gyökérben is legyen "..", ami visszavisz a gyökérbe? Inkább a gyökérben ne legyen.
-        // A felhasználó kérése: üres mappa esetén is legyen "..". A gyökérben nem kell "..", mert nincs szülő.
+
+        // ".." gomb: csak ha nem a gyökérben vagyunk
         if (currentPath !== '') {
             const parentDiv = document.createElement('div');
             parentDiv.className = 'tree-item';
             parentDiv.textContent = '📁 ..';
             parentDiv.onclick = () => {
-                // Visszalépés a szülő mappába
                 const parts = currentPath.split('/');
                 parts.pop();
                 currentPath = parts.join('/');
                 currentPage = 1;
                 loadTree();
                 loadFiles();
-                highlightSelectedTreeItem();
             };
             treeDiv.prepend(parentDiv);
         }
-        highlightSelectedTreeItem();
     } catch (err) {
         console.error('Error loading tree:', err);
         const treeDiv = document.getElementById('tree');
@@ -266,8 +260,9 @@ async function fixFolder() {
         alert('Please select a folder first.');
         return;
     }
-    const root = (await (await fetch('/api/sources')).json())[currentSource];
-    const fullPath = filepathJoin(root, currentPath);
+    const sources = await (await fetch('/api/sources')).json();
+    const root = sources[currentSource];
+    const fullPath = root + '/' + currentPath;
     const res = await fetch('/api/batch_fix_path', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -310,7 +305,8 @@ async function fixFolder() {
 }
 
 async function fixAll() {
-    const root = (await (await fetch('/api/sources')).json())[currentSource];
+    const sources = await (await fetch('/api/sources')).json();
+    const root = sources[currentSource];
     const res = await fetch('/api/batch_fix_path', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -350,11 +346,6 @@ async function fixAll() {
     } else {
         alert('Failed to start full fix.');
     }
-}
-
-function filepathJoin(root, sub) {
-    if (root.endsWith('/')) return root + sub;
-    return root + '/' + sub;
 }
 
 function renderPagination() {
