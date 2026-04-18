@@ -21,7 +21,7 @@ import (
     _ "github.com/mattn/go-sqlite3"
 )
 
-const version = "0.3.3"
+const version = "0.3.4"
 
 var (
     watchSources   []string
@@ -478,7 +478,6 @@ func main() {
             json.NewEncoder(w).Encode([]string{})
             return
         }
-        // lekérjük a path query paramétert (a mappán belüli relatív út)
         subpath := r.URL.Query().Get("path")
         root := strings.TrimSpace(watchSources[sourceIdx])
         fullPath := root

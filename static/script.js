@@ -26,7 +26,7 @@ async function loadTabs() {
     } catch (err) {
         console.error('Error loading tabs:', err);
         const tabsDiv = document.getElementById('tabs');
-        if (tabsDiv) tabsDiv.innerHTML = '<div style="color:red;">Error loading tabs</div>';
+        if (tabsDiv) tabsDiv.innerHTML = '';
     }
 }
 
@@ -61,7 +61,6 @@ async function loadTree() {
         const treeHeader = document.getElementById('treeHeader');
         if (!treeDiv) return;
 
-        // Fejléc beállítása
         if (currentPath === '') {
             const sources = await (await fetch('/api/sources')).json();
             treeHeader.textContent = `📁 ${sources[currentSource]}`;
@@ -72,7 +71,6 @@ async function loadTree() {
 
         treeDiv.innerHTML = '';
 
-        // Alkonyvtarak
         if (dirs.length > 0) {
             dirs.forEach(dir => {
                 const div = document.createElement('div');
@@ -88,7 +86,6 @@ async function loadTree() {
             });
         }
 
-        // ".." gomb: csak ha nem a gyökérben vagyunk
         if (currentPath !== '') {
             const parentDiv = document.createElement('div');
             parentDiv.className = 'tree-item';
@@ -105,8 +102,9 @@ async function loadTree() {
         }
     } catch (err) {
         console.error('Error loading tree:', err);
+        // Nem jelenítünk meg semmit a felhasználónak
         const treeDiv = document.getElementById('tree');
-        if (treeDiv) treeDiv.innerHTML = '<div style="color:red;">Error loading folders</div>';
+        if (treeDiv) treeDiv.innerHTML = '';
     }
 }
 
@@ -151,7 +149,7 @@ async function loadFiles() {
     } catch (err) {
         console.error('Error loading files:', err);
         const tbody = document.querySelector('#fileTable tbody');
-        if (tbody) tbody.innerHTML = '<tr><td colspan="4">Error loading files</td></tr>';
+        if (tbody) tbody.innerHTML = '';
     }
 }
 

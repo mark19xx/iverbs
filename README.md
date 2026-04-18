@@ -1,6 +1,6 @@
 # IVERBS – Image & Video EXIF Restore (Go Backend)
 
-**Version 0.3.3** – Stable, low‑resource, always‑on watchdog, SQLite cache, three fix modes.
+**Version 0.3.4** – Stable, low‑resource, always‑on watchdog, SQLite cache, three fix modes.
 
 ---
 
