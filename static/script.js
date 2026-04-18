@@ -38,6 +38,7 @@ function switchSource(idx) {
     loadTree();
     loadFiles();
     highlightActiveTab();
+    updateParentButton();
 }
 
 function highlightActiveTab() {
@@ -46,6 +47,27 @@ function highlightActiveTab() {
         if (i === currentSource) tab.classList.add('active');
         else tab.classList.remove('active');
     });
+}
+
+function updateParentButton() {
+    const parentBtn = document.getElementById('treeParentButton');
+    if (!parentBtn) return;
+    if (currentPath !== '') {
+        parentBtn.style.display = 'block';
+        parentBtn.onclick = () => {
+            const parts = currentPath.split('/');
+            parts.pop();
+            currentPath = parts.join('');
+            if (currentPath === '') {
+                currentPath = '';
+            }
+            currentPage = 1;
+            loadTree();
+            loadFiles();
+        };
+    } else {
+        parentBtn.style.display = 'none';
+    }
 }
 
 async function loadTree() {
@@ -61,7 +83,6 @@ async function loadTree() {
         const treeHeader = document.getElementById('treeHeader');
         if (!treeDiv) return;
 
-        // Fejléc beállítása
         if (currentPath === '') {
             const sources = await (await fetch('/api/sources')).json();
             treeHeader.textContent = `📁 ${sources[currentSource]}`;
@@ -72,26 +93,6 @@ async function loadTree() {
 
         treeDiv.innerHTML = '';
 
-        // Először hozzáadjuk a ".." gombot, ha nem a gyökérben vagyunk
-        if (currentPath !== '') {
-            const parentDiv = document.createElement('div');
-            parentDiv.className = 'tree-item';
-            parentDiv.textContent = '📁 ..';
-            parentDiv.onclick = () => {
-                const parts = currentPath.split('/');
-                parts.pop();
-                currentPath = parts.join('');
-                if (currentPath === '') {
-                    currentPath = '';
-                }
-                currentPage = 1;
-                loadTree();
-                loadFiles();
-            };
-            treeDiv.appendChild(parentDiv);
-        }
-
-        // Majd az alkönyvtárak
         if (dirs.length > 0) {
             dirs.forEach(dir => {
                 const div = document.createElement('div');
@@ -102,13 +103,13 @@ async function loadTree() {
                     currentPage = 1;
                     loadTree();
                     loadFiles();
+                    updateParentButton();
                 };
                 treeDiv.appendChild(div);
             });
         }
 
-        // Ha nincs alkönyvtár és nem a gyökérben vagyunk, akkor is van ".." (már hozzáadtuk)
-        // Ha a gyökérben vagyunk és nincs alkönyvtár, akkor semmi sem jelenik meg (üres)
+        updateParentButton();
     } catch (err) {
         console.error('Error loading tree:', err);
         const treeDiv = document.getElementById('tree');

@@ -6,7 +6,7 @@ on:
       version:
         description: 'Version tag (e.g., 0.3.3)'
         required: true
-        default: '0.3.3'
+        default: '0.3.5'
         type: string
 
 jobs:
