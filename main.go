@@ -21,7 +21,7 @@ import (
     _ "github.com/mattn/go-sqlite3"
 )
 
-const version = "0.3.4"
+const version = "0.3.5"
 
 var (
     watchSources   []string
