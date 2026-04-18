@@ -50,21 +50,31 @@ function highlightActiveTab() {
 
 async function loadTree() {
     try {
-        const res = await fetch(`/api/tree/${currentSource}`);
+        // A lekérdezéshez adjuk hozzá a currentPath paramétert
+        let url = `/api/tree/${currentSource}`;
+        if (currentPath) {
+            url += `?path=${encodeURIComponent(currentPath)}`;
+        }
+        const res = await fetch(url);
         if (!res.ok) throw new Error('Tree API error');
         const dirs = await res.json();
         const treeDiv = document.getElementById('tree');
+        const treeHeader = document.getElementById('treeHeader');
         if (!treeDiv) return;
-        treeDiv.innerHTML = '';
-        if (dirs.length === 0) {
-            // Nincs alkönyvtár: szöveges üzenet (nem hiba)
-            const msgDiv = document.createElement('div');
-            msgDiv.textContent = 'no subfolders';
-            msgDiv.style.color = '#fdfdfd';
-            msgDiv.style.opacity = '0.75';
-            msgDiv.style.padding = '4px 0';
-            treeDiv.appendChild(msgDiv);
+
+        // Fejléc beállítása: aktuális mappa neve
+        if (currentPath === '') {
+            // Gyökér: a tab neve (a forrás mappa neve)
+            const sources = await (await fetch('/api/sources')).json();
+            treeHeader.textContent = `📁 ${sources[currentSource]}`;
         } else {
+            // Almappa: a mappa neve
+            treeHeader.textContent = `📁 ${currentPath}`;
+        }
+
+        treeDiv.innerHTML = '';
+        // Ha vannak alkönyvtárak, listázzuk őket
+        if (dirs.length > 0) {
             dirs.forEach(dir => {
                 const div = document.createElement('div');
                 div.className = 'tree-item';
@@ -73,43 +83,37 @@ async function loadTree() {
                 div.onclick = () => {
                     currentPath = dir;
                     currentPage = 1;
-                    loadFiles();
+                    loadTree();   // újra betöltjük a fát az új mappához
+                    loadFiles();  // és a fájlokat
                     highlightSelectedTreeItem();
                 };
                 treeDiv.appendChild(div);
             });
         }
-        const rootDiv = document.createElement('div');
-        rootDiv.className = 'tree-item';
-        if (currentPath === '') rootDiv.classList.add('selected');
-        rootDiv.textContent = '📁 ..';
-        rootDiv.onclick = () => {
-            currentPath = '';
-            currentPage = 1;
-            loadFiles();
-            highlightSelectedTreeItem();
-        };
-        treeDiv.prepend(rootDiv);
+        // ".." gomb – mindig jelen van, kivéve ha a gyökérben vagyunk? A gyökérben is legyen "..", ami visszavisz a gyökérbe? Inkább a gyökérben ne legyen.
+        // A felhasználó kérése: üres mappa esetén is legyen "..". A gyökérben nem kell "..", mert nincs szülő.
+        if (currentPath !== '') {
+            const parentDiv = document.createElement('div');
+            parentDiv.className = 'tree-item';
+            parentDiv.textContent = '📁 ..';
+            parentDiv.onclick = () => {
+                // Visszalépés a szülő mappába
+                const parts = currentPath.split('/');
+                parts.pop();
+                currentPath = parts.join('/');
+                currentPage = 1;
+                loadTree();
+                loadFiles();
+                highlightSelectedTreeItem();
+            };
+            treeDiv.prepend(parentDiv);
+        }
         highlightSelectedTreeItem();
     } catch (err) {
         console.error('Error loading tree:', err);
         const treeDiv = document.getElementById('tree');
         if (treeDiv) treeDiv.innerHTML = '<div style="color:red;">Error loading folders</div>';
     }
-}
-
-function highlightSelectedTreeItem() {
-    const items = document.querySelectorAll('.tree-item');
-    items.forEach(item => {
-        if (item.textContent.includes(currentPath) && currentPath !== '') {
-            if (item.textContent === `📁 ${currentPath}`) item.classList.add('selected');
-            else item.classList.remove('selected');
-        } else if (currentPath === '' && item.textContent === '📁 ..') {
-            item.classList.add('selected');
-        } else {
-            item.classList.remove('selected');
-        }
-    });
 }
 
 async function loadFiles() {

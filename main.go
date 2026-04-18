@@ -468,20 +468,26 @@ func main() {
     })
 
     http.HandleFunc("/api/tree/", func(w http.ResponseWriter, r *http.Request) {
-        parts := strings.Split(r.URL.Path, "/")
-        if len(parts) < 4 {
-            http.Error(w, "Invalid request", http.StatusBadRequest)
-            return
-        }
-        sourceIdx, err := strconv.Atoi(parts[3])
-        if err != nil || sourceIdx >= len(watchSources) {
-            json.NewEncoder(w).Encode([]string{})
-            return
-        }
-        root := strings.TrimSpace(watchSources[sourceIdx])
-        tree := getTree(root)
-        json.NewEncoder(w).Encode(tree)
-    })
+    parts := strings.Split(r.URL.Path, "/")
+    if len(parts) < 4 {
+        http.Error(w, "Invalid request", http.StatusBadRequest)
+        return
+    }
+    sourceIdx, err := strconv.Atoi(parts[3])
+    if err != nil || sourceIdx >= len(watchSources) {
+        json.NewEncoder(w).Encode([]string{})
+        return
+    }
+    // Olvassuk ki a path query paramétert (ha van)
+    subpath := r.URL.Query().Get("path")
+    root := strings.TrimSpace(watchSources[sourceIdx])
+    fullPath := root
+    if subpath != "" {
+        fullPath = filepath.Join(root, subpath)
+    }
+    tree := getTree(fullPath) // getTree most már az aktuális mappát vizsgálja
+    json.NewEncoder(w).Encode(tree)
+})
 
     http.HandleFunc("/api/browse", func(w http.ResponseWriter, r *http.Request) {
         sourceIdx, _ := strconv.Atoi(r.URL.Query().Get("source"))
